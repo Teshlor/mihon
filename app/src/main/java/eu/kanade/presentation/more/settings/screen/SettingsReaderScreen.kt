@@ -391,6 +391,13 @@ object SettingsReaderScreen : SearchableSettings {
         val smoothKeyScrollSpeedPref = readerPreferences.webtoonSmoothKeyScrollSpeed
         val smoothKeyScrollSpeed by smoothKeyScrollSpeedPref.collectAsState()
 
+        val autoScrollKeyTogglePref = readerPreferences.webtoonAutoScrollKeyToggle
+        val autoScrollKeyToggle by autoScrollKeyTogglePref.collectAsState()
+        val autoScrollVolumeTriplePress by readerPreferences.webtoonAutoScrollVolumeTriplePress
+            .collectAsState()
+        val autoScrollSpeedPref = readerPreferences.webtoonAutoScrollSpeed
+        val autoScrollSpeed by autoScrollSpeedPref.collectAsState()
+
         val verticalNavigator by readerPreferences.verticalNavigator.collectAsState()
         val verticalNavigatorHeightPref = readerPreferences.verticalNavigatorHeight
         val verticalNavigatorHeight by verticalNavigatorHeightPref.collectAsState()
@@ -420,6 +427,29 @@ object SettingsReaderScreen : SearchableSettings {
                     valueString = numberFormat.format(smoothKeyScrollSpeed / 100f),
                     onValueChanged = { smoothKeyScrollSpeedPref.set(it) },
                     enabled = smoothKeyScroll,
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = autoScrollKeyTogglePref,
+                    title = stringResource(MR.strings.pref_webtoon_auto_scroll_key_toggle),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.webtoonAutoScrollVolumeTriplePress,
+                    title = stringResource(MR.strings.pref_webtoon_auto_scroll_volume_triple_press),
+                    subtitle = stringResource(
+                        MR.strings.pref_webtoon_auto_scroll_volume_triple_press_summary,
+                    ),
+                    enabled = readWithVolumeKeys,
+                ),
+                Preference.PreferenceItem.SliderPreference(
+                    value = autoScrollSpeed,
+                    valueRange = ReaderPreferences.let {
+                        it.AUTO_SCROLL_SPEED_MIN..it.AUTO_SCROLL_SPEED_MAX
+                    },
+                    title = stringResource(MR.strings.pref_webtoon_auto_scroll_speed),
+                    valueString = numberFormat.format(autoScrollSpeed / 100f),
+                    onValueChanged = { autoScrollSpeedPref.set(it) },
+                    enabled = autoScrollKeyToggle ||
+                        (autoScrollVolumeTriplePress && readWithVolumeKeys),
                 ),
                 Preference.PreferenceItem.MultiSelectListPreference(
                     preference = readerPreferences.verticalNavigator,

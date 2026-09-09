@@ -259,13 +259,13 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
         )
     }
 
+    // The auto-scroll triggers live in Settings > Reader > Navigation alongside the other key
+    // options. Only the speed is offered here, for adjustment without leaving the reader.
     val autoScrollKeyToggle by viewModel.preferences.webtoonAutoScrollKeyToggle.collectAsState()
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_webtoon_auto_scroll_key_toggle),
-        pref = viewModel.preferences.webtoonAutoScrollKeyToggle,
-    )
+    val autoScrollVolumeTriplePress by viewModel.preferences.webtoonAutoScrollVolumeTriplePress
+        .collectAsState()
 
-    if (autoScrollKeyToggle) {
+    if (autoScrollKeyToggle || autoScrollVolumeTriplePress) {
         val autoScrollSpeed by viewModel.preferences.webtoonAutoScrollSpeed.collectAsState()
         SliderItem(
             value = autoScrollSpeed,
