@@ -44,6 +44,7 @@ class ChapterRepositoryImpl(
                         chapter.dateUpload,
                         chapter.version,
                         chapter.memo,
+                        chapter.lastPageOffset,
                     )
                         .awaitAsOne()
                     chapter.copy(id = chapterId)
@@ -82,6 +83,7 @@ class ChapterRepositoryImpl(
                     version = chapterUpdate.version,
                     isSyncing = 0,
                     memo = chapterUpdate.memo?.let(MemoColumnAdapter::encode),
+                    lastPageOffset = chapterUpdate.lastPageOffset,
                 )
             }
         }
@@ -155,6 +157,7 @@ class ChapterRepositoryImpl(
         version: Long,
         isSyncing: Long,
         memo: JsonObject,
+        lastPageOffset: Double,
     ): Chapter = Chapter(
         id = id,
         mangaId = mangaId,
@@ -171,5 +174,6 @@ class ChapterRepositoryImpl(
         lastModifiedAt = lastModifiedAt,
         version = version,
         memo = memo,
+        lastPageOffset = lastPageOffset,
     )
 }

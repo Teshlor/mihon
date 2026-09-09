@@ -113,6 +113,15 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private var volumeUpLastPressMillis = 0L
 
     /**
+     * Page whose saved scroll offset is still waiting to be applied, and how far into it to go.
+     * Held until the image decodes, because the offset is a fraction of the page's real height and
+     * a placeholder is the wrong size to measure against. Cleared if the reader touches the screen
+     * first, so restoring never yanks the page out from under them.
+     */
+    private var pendingRestorePage: ReaderPage? = null
+    private var pendingRestoreFraction = 0.0
+
+    /**
      * Sub-pixel scroll carried over between frames so slow speeds don't round to zero.
      */
     private var scrollRemainder = 0f
@@ -273,7 +282,10 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         recycler.addOnItemTouchListener(
             object : RecyclerView.SimpleOnItemTouchListener() {
                 override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
-                    if (e.actionMasked == MotionEvent.ACTION_DOWN) setAutoScroll(false)
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                        setAutoScroll(false)
+                        pendingRestorePage = null
+                    }
                     return false
                 }
             },
@@ -369,7 +381,13 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         if (recycler.isGone) {
             logcat { "Recycler first layout" }
             val pages = chapters.currChapter.pages ?: return
-            moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
+            val requested = pages[min(chapters.currChapter.requestedPage, pages.lastIndex)]
+            moveToPage(requested)
+            val offset = chapters.currChapter.requestedPageOffset
+            if (offset > 0.0) {
+                pendingRestorePage = requested
+                pendingRestoreFraction = offset
+            }
             recycler.isVisible = true
         }
     }
@@ -517,6 +535,38 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         when (event.action) {
             KeyEvent.ACTION_DOWN -> startHoldScroll(if (forward) 1 else -1)
             KeyEvent.ACTION_UP -> stopHoldScroll()
+        }
+    }
+
+    /**
+     * How far the reader has scrolled into the selected page, as a fraction of its height.
+     */
+    override fun currentPageOffsetFraction(): Double {
+        val page = currentPage as? ReaderPage ?: return 0.0
+        val position = adapter.items.indexOf(page)
+        if (position == RecyclerView.NO_POSITION) return 0.0
+        val view = layoutManager.findViewByPosition(position) ?: return 0.0
+        if (view.height <= 0) return 0.0
+        return ((-view.top).toDouble() / view.height).coerceIn(0.0, 1.0)
+    }
+
+    /**
+     * Called by a page holder once its image has decoded and the view has its real height. This is
+     * the earliest point at which a saved fractional offset can be turned into a pixel distance.
+     */
+    fun onPageImageDecoded(page: ReaderPage) {
+        if (page !== pendingRestorePage) return
+        val fraction = pendingRestoreFraction
+        pendingRestorePage = null
+        pendingRestoreFraction = 0.0
+        if (fraction <= 0.0) return
+
+        val position = adapter.items.indexOf(page)
+        if (position == RecyclerView.NO_POSITION) return
+        recycler.post {
+            val view = layoutManager.findViewByPosition(position) ?: return@post
+            if (view.height <= 0) return@post
+            recycler.scrollBy(0, view.top + (fraction * view.height).toInt())
         }
     }
 

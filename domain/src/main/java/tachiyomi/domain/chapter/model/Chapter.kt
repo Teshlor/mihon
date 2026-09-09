@@ -19,6 +19,11 @@ data class Chapter(
     val lastModifiedAt: Long,
     val version: Long,
     val memo: JsonObject,
+    /**
+     * How far into [lastPageRead] the reader had scrolled, as a fraction of that page's height.
+     * Zero means the top of the page, which is how every chapter read before this existed.
+     */
+    val lastPageOffset: Double = 0.0,
 ) {
     val isRecognizedNumber: Boolean
         get() = chapterNumber >= 0f
@@ -50,6 +55,7 @@ data class Chapter(
             lastModifiedAt = 0,
             version = 1,
             memo = JsonObject.EMPTY,
+            lastPageOffset = 0.0,
         )
     }
 }

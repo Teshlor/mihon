@@ -345,8 +345,10 @@ class ReaderActivity : BaseActivity() {
     }
 
     override fun onPause() {
+        val scrollOffset = viewModel.state.value.viewer?.currentPageOffsetFraction() ?: 0.0
         lifecycleScope.launchNonCancellable {
             viewModel.updateHistory()
+            viewModel.saveScrollOffset(scrollOffset)
         }
         super.onPause()
     }

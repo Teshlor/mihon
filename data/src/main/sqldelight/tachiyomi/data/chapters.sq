@@ -18,6 +18,9 @@ CREATE TABLE chapters(
     version INTEGER NOT NULL DEFAULT 0,
     is_syncing INTEGER NOT NULL DEFAULT 0,
     memo BLOB AS JsonObject NOT NULL DEFAULT '{}',
+    -- How far into last_page_read the reader had scrolled, as a fraction of that page's height.
+    -- Declared last so a fresh table matches one upgraded by ALTER TABLE ADD COLUMN.
+    last_page_offset REAL NOT NULL DEFAULT 0.0,
     FOREIGN KEY(manga_id) REFERENCES mangas (_id)
     ON DELETE CASCADE
 );
@@ -101,12 +104,13 @@ SET is_syncing = 0
 WHERE is_syncing = 1;
 
 insert:
-INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload, last_modified_at, version, is_syncing, memo)
-VALUES (:mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead, :chapterNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, 0, :memo);
+INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload, last_modified_at, version, is_syncing, memo, last_page_offset)
+VALUES (:mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead, :chapterNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, 0, :memo, :lastPageOffset);
+
 
 insertReturningId:
-INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload, last_modified_at, version, is_syncing, memo)
-VALUES (:mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead, :chapterNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, 0, :memo)
+INSERT INTO chapters(manga_id, url, name, scanlator, read, bookmark, last_page_read, chapter_number, source_order, date_fetch, date_upload, last_modified_at, version, is_syncing, memo, last_page_offset)
+VALUES (:mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead, :chapterNumber, :sourceOrder, :dateFetch, :dateUpload, 0, :version, 0, :memo, :lastPageOffset)
 RETURNING _id;
 
 update:
@@ -124,5 +128,6 @@ SET manga_id = coalesce(:mangaId, manga_id),
     date_upload = coalesce(:dateUpload, date_upload),
     version = coalesce(:version, version),
     is_syncing = coalesce(:isSyncing, is_syncing),
-    memo = coalesce(:memo, memo)
+    memo = coalesce(:memo, memo),
+    last_page_offset = coalesce(:lastPageOffset, last_page_offset)
 WHERE _id = :chapterId;

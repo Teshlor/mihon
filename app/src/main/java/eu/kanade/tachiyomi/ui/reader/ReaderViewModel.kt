@@ -284,6 +284,7 @@ class ReaderViewModel(
                     currentChapter.requestedPage = chapterPageIndex
                 } else if (!currentChapter.chapter.read) {
                     currentChapter.requestedPage = currentChapter.chapter.last_page_read
+                    currentChapter.requestedPageOffset = currentChapter.chapter.last_page_offset
                 }
                 chapterId = currentChapter.chapter.id!!
             }
@@ -590,6 +591,26 @@ class ReaderViewModel(
                 ),
             )
         }
+    }
+
+    /**
+     * Persists how far into the current page the reader had scrolled, so reopening the chapter
+     * resumes at the same spot rather than at the top of a page that may be very tall.
+     */
+    suspend fun saveScrollOffset(offset: Double) {
+        if (incognitoMode) return
+        val readerChapter = getCurrentChapter() ?: return
+        val chapterId = readerChapter.chapter.id ?: return
+        if (readerChapter.chapter.last_page_offset == offset) return
+
+        readerChapter.chapter.last_page_offset = offset
+        readerChapter.requestedPageOffset = offset
+        updateChapter.await(
+            ChapterUpdate(
+                id = chapterId,
+                lastPageOffset = offset,
+            ),
+        )
     }
 
     private suspend fun updateChapterProgressOnComplete(readerChapter: ReaderChapter) {

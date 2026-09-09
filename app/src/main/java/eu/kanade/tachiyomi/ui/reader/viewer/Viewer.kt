@@ -32,6 +32,12 @@ interface Viewer {
     fun moveToPage(page: ReaderPage)
 
     /**
+     * How far the reader has scrolled into the currently selected page, as a fraction of that
+     * page's height. Viewers that show one page at a time have nothing to report.
+     */
+    fun currentPageOffsetFraction(): Double = 0.0
+
+    /**
      * Called from the containing activity when a key [event] is received. It should return true
      * if the event was handled, false otherwise.
      */

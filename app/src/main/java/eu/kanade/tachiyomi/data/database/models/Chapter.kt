@@ -18,6 +18,8 @@ interface Chapter : SChapter, Serializable {
 
     var last_page_read: Int
 
+    var last_page_offset: Double
+
     var date_fetch: Long
 
     var source_order: Int
@@ -48,5 +50,6 @@ fun Chapter.toDomainChapter(): DomainChapter? {
         lastModifiedAt = last_modified,
         version = version,
         memo = memo,
+        lastPageOffset = last_page_offset,
     )
 }

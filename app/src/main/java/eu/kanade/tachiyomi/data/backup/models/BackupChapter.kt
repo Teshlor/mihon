@@ -26,6 +26,7 @@ class BackupChapter(
     @ProtoNumber(11) var lastModifiedAt: Long = 0,
     @ProtoNumber(12) var version: Long = 0,
     @ProtoNumber(13) var memo: ByteArray = JsonObjectEmptyBytes,
+    @ProtoNumber(14) var lastPageOffset: Double = 0.0,
 ) {
     fun toChapterImpl(): Chapter {
         return Chapter.create().copy(
@@ -42,6 +43,7 @@ class BackupChapter(
             lastModifiedAt = this@BackupChapter.lastModifiedAt,
             version = this@BackupChapter.version,
             memo = MemoColumnAdapter.decode(this@BackupChapter.memo),
+            lastPageOffset = this@BackupChapter.lastPageOffset,
         )
     }
 }
@@ -63,6 +65,7 @@ val backupChapterMapper = {
         version: Long,
         _: Long,
         memo: JsonObject,
+        lastPageOffset: Double,
     ->
     BackupChapter(
         url = url,
@@ -78,5 +81,6 @@ val backupChapterMapper = {
         lastModifiedAt = lastModifiedAt,
         version = version,
         memo = MemoColumnAdapter.encode(memo),
+        lastPageOffset = lastPageOffset,
     )
 }
