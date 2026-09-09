@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.graphics.PointF
+import android.view.Choreographer
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -71,6 +72,38 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private var currentPage: Any? = null
 
     private val threshold: Int by lazy { readerPreferences.readerHideThreshold.get().threshold }
+
+    /**
+     * Pixels per second scrolled while a scroll key is held and [WebtoonConfig.smoothKeyScroll] is on.
+     */
+    private val keyScrollVelocity = activity.resources.displayMetrics.heightPixels * KEY_SCROLL_SCREENS_PER_SECOND
+
+    /**
+     * Direction of the active hold-to-scroll: -1 up, 1 down, 0 idle.
+     */
+    private var keyScrollDirection = 0
+    private var keyScrollLastFrameNanos = 0L
+
+    /**
+     * Sub-pixel scroll carried over between frames so slow speeds don't round to zero.
+     */
+    private var keyScrollRemainder = 0f
+
+    private val keyScrollFrameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (keyScrollDirection == 0) return
+            if (keyScrollLastFrameNanos != 0L) {
+                val dtSeconds = ((frameTimeNanos - keyScrollLastFrameNanos) / NANOS_PER_SECOND)
+                    .coerceAtMost(KEY_SCROLL_MAX_FRAME_SECONDS)
+                val dy = keyScrollDirection * keyScrollVelocity * dtSeconds + keyScrollRemainder
+                val wholeDy = dy.toInt()
+                keyScrollRemainder = dy - wholeDy
+                if (wholeDy != 0) recycler.scrollBy(0, wholeDy)
+            }
+            keyScrollLastFrameNanos = frameTimeNanos
+            Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
 
     init {
         recycler.setItemViewCacheSize(RECYCLER_VIEW_CACHE_SIZE)
@@ -192,6 +225,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      */
     override fun destroy() {
         super.destroy()
+        stopKeyScroll()
         scope.cancel()
     }
 
@@ -296,6 +330,43 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     }
 
     /**
+     * Starts scrolling continuously in [direction] (-1 up, 1 down) on every frame until
+     * [stopKeyScroll] is called. Re-calling with the same direction is a no-op.
+     */
+    private fun startKeyScroll(direction: Int) {
+        if (keyScrollDirection == direction) return
+        recycler.stopScroll()
+        keyScrollDirection = direction
+        keyScrollLastFrameNanos = 0L
+        keyScrollRemainder = 0f
+        Choreographer.getInstance().removeFrameCallback(keyScrollFrameCallback)
+        Choreographer.getInstance().postFrameCallback(keyScrollFrameCallback)
+    }
+
+    private fun stopKeyScroll() {
+        keyScrollDirection = 0
+        Choreographer.getInstance().removeFrameCallback(keyScrollFrameCallback)
+    }
+
+    /**
+     * Handles a scroll key [event]. With [WebtoonConfig.smoothKeyScroll] enabled the viewer scrolls
+     * continuously from ACTION_DOWN until ACTION_UP; otherwise the original single jump fires on
+     * ACTION_UP. [forward] is true for keys that scroll towards the end of the chapter.
+     */
+    private fun handleScrollKey(event: KeyEvent, forward: Boolean) {
+        if (!config.smoothKeyScroll) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                if (forward) scrollDown() else scrollUp()
+            }
+            return
+        }
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> startKeyScroll(if (forward) 1 else -1)
+            KeyEvent.ACTION_UP -> stopKeyScroll()
+        }
+    }
+
+    /**
      * Called from the containing activity when a key [event] is received. It should return true
      * if the event was handled, false otherwise.
      */
@@ -306,32 +377,34 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 
         val isUp = event.action == KeyEvent.ACTION_UP
 
+        // Any key release ends an active hold-to-scroll, even if the branch below declines the
+        // event (e.g. the menu opened mid-hold), so the frame loop can never be left running.
+        if (isUp && keyScrollDirection != 0) stopKeyScroll()
+
         when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
                 if (!config.volumeKeysEnabled || activity.viewModel.state.value.menuVisible) {
                     return false
-                } else if (isUp) {
-                    if (!config.volumeKeysInverted) scrollDown() else scrollUp()
                 }
+                handleScrollKey(event, forward = !config.volumeKeysInverted)
             }
             KeyEvent.KEYCODE_VOLUME_UP -> {
                 if (!config.volumeKeysEnabled || activity.viewModel.state.value.menuVisible) {
                     return false
-                } else if (isUp) {
-                    if (!config.volumeKeysInverted) scrollUp() else scrollDown()
                 }
+                handleScrollKey(event, forward = config.volumeKeysInverted)
             }
             KeyEvent.KEYCODE_MENU -> if (isUp) activity.toggleMenu()
 
             KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_DPAD_UP,
             KeyEvent.KEYCODE_PAGE_UP,
-            -> if (isUp) scrollUp()
+            -> handleScrollKey(event, forward = false)
 
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_PAGE_DOWN,
-            -> if (isUp) scrollDown()
+            -> handleScrollKey(event, forward = true)
             else -> return false
         }
         return true
@@ -361,3 +434,11 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
 private const val RECYCLER_VIEW_CACHE_SIZE = 4
+
+// Hold-to-scroll speed as screen heights per second. Constant for now; a user-facing speed
+// preference is planned alongside auto-scroll.
+private const val KEY_SCROLL_SCREENS_PER_SECOND = 1f
+
+// Cap the per-frame time delta so a dropped frame or a paused app doesn't produce one huge jump.
+private const val KEY_SCROLL_MAX_FRAME_SECONDS = 0.1f
+private const val NANOS_PER_SECOND = 1_000_000_000f
