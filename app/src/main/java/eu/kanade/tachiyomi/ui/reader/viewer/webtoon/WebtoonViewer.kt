@@ -10,6 +10,8 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.WebtoonLayoutManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -73,35 +75,74 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 
     private val threshold: Int by lazy { readerPreferences.readerHideThreshold.get().threshold }
 
+    private val screenHeight = activity.resources.displayMetrics.heightPixels
+
     /**
      * Pixels per second scrolled while a scroll key is held and [WebtoonConfig.smoothKeyScroll] is on.
      */
-    private val keyScrollVelocity = activity.resources.displayMetrics.heightPixels * KEY_SCROLL_SCREENS_PER_SECOND
+    private val keyScrollVelocity = screenHeight * KEY_SCROLL_SCREENS_PER_SECOND
 
     /**
      * Direction of the active hold-to-scroll: -1 up, 1 down, 0 idle.
      */
-    private var keyScrollDirection = 0
-    private var keyScrollLastFrameNanos = 0L
+    private var holdScrollDirection = 0
+
+    /**
+     * Whether auto-scroll is currently running. Held scroll keys temporarily override it, and it
+     * resumes when they are released.
+     */
+    private var autoScrollActive = false
+
+    private var scrollLoopRunning = false
+    private var scrollLoopLastFrameNanos = 0L
 
     /**
      * Sub-pixel scroll carried over between frames so slow speeds don't round to zero.
      */
-    private var keyScrollRemainder = 0f
+    private var scrollRemainder = 0f
 
-    private val keyScrollFrameCallback = object : Choreographer.FrameCallback {
+    /**
+     * Signed pixels per second the frame loop should currently scroll by, or zero when idle.
+     * A held key wins over auto-scroll so manual navigation stays responsive.
+     */
+    private val activeScrollVelocity: Float
+        get() = when {
+            holdScrollDirection != 0 -> holdScrollDirection * keyScrollVelocity
+            autoScrollActive -> screenHeight * config.autoScrollSpeed / SCREEN_FRACTION_DENOMINATOR
+            else -> 0f
+        }
+
+    private val scrollFrameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            if (keyScrollDirection == 0) return
-            if (keyScrollLastFrameNanos != 0L) {
-                val dtSeconds = ((frameTimeNanos - keyScrollLastFrameNanos) / NANOS_PER_SECOND)
-                    .coerceAtMost(KEY_SCROLL_MAX_FRAME_SECONDS)
-                val dy = keyScrollDirection * keyScrollVelocity * dtSeconds + keyScrollRemainder
+            val velocity = activeScrollVelocity
+            if (velocity == 0f) {
+                stopScrollLoop()
+                return
+            }
+            if (scrollLoopLastFrameNanos != 0L) {
+                val dtSeconds = ((frameTimeNanos - scrollLoopLastFrameNanos) / NANOS_PER_SECOND)
+                    .coerceAtMost(SCROLL_MAX_FRAME_SECONDS)
+                val dy = velocity * dtSeconds + scrollRemainder
                 val wholeDy = dy.toInt()
-                keyScrollRemainder = dy - wholeDy
+                scrollRemainder = dy - wholeDy
                 if (wholeDy != 0) recycler.scrollBy(0, wholeDy)
             }
-            keyScrollLastFrameNanos = frameTimeNanos
+            // Stop auto-scrolling once the end of the loaded content is reached, so the frame loop
+            // doesn't spin forever against a recycler that can no longer move.
+            if (autoScrollActive && holdScrollDirection == 0 && !recycler.canScrollVertically(1)) {
+                setAutoScroll(false)
+                return
+            }
+            scrollLoopLastFrameNanos = frameTimeNanos
             Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    private val lifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onPause(owner: LifecycleOwner) {
+            // Never keep advancing the chapter while the reader is in the background.
+            setAutoScroll(false)
+            stopHoldScroll()
         }
     }
 
@@ -189,6 +230,23 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
             activity.binding.navigationOverlay.setNavigation(config.navigator, showOnStart)
         }
 
+        config.autoScrollKeyToggleChangedListener = { enabled ->
+            if (!enabled) setAutoScroll(false)
+        }
+
+        // Any touch on the pages cancels auto-scroll, which covers drags, flings and tap-zone
+        // navigation alike. The listener only observes; it never consumes the event.
+        recycler.addOnItemTouchListener(
+            object : RecyclerView.SimpleOnItemTouchListener() {
+                override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN) setAutoScroll(false)
+                    return false
+                }
+            },
+        )
+
+        activity.lifecycle.addObserver(lifecycleObserver)
+
         frame.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
         frame.addView(recycler)
     }
@@ -225,7 +283,10 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      */
     override fun destroy() {
         super.destroy()
-        stopKeyScroll()
+        activity.lifecycle.removeObserver(lifecycleObserver)
+        autoScrollActive = false
+        holdScrollDirection = 0
+        stopScrollLoop()
         scope.cancel()
     }
 
@@ -330,22 +391,59 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     }
 
     /**
-     * Starts scrolling continuously in [direction] (-1 up, 1 down) on every frame until
-     * [stopKeyScroll] is called. Re-calling with the same direction is a no-op.
+     * Starts the per-frame scroll loop if anything currently wants to scroll, and stops it
+     * otherwise. Safe to call whenever hold or auto-scroll state changes.
      */
-    private fun startKeyScroll(direction: Int) {
-        if (keyScrollDirection == direction) return
-        recycler.stopScroll()
-        keyScrollDirection = direction
-        keyScrollLastFrameNanos = 0L
-        keyScrollRemainder = 0f
-        Choreographer.getInstance().removeFrameCallback(keyScrollFrameCallback)
-        Choreographer.getInstance().postFrameCallback(keyScrollFrameCallback)
+    private fun updateScrollLoop() {
+        if (activeScrollVelocity != 0f) {
+            if (scrollLoopRunning) return
+            scrollLoopRunning = true
+            scrollLoopLastFrameNanos = 0L
+            scrollRemainder = 0f
+            Choreographer.getInstance().postFrameCallback(scrollFrameCallback)
+        } else {
+            stopScrollLoop()
+        }
     }
 
-    private fun stopKeyScroll() {
-        keyScrollDirection = 0
-        Choreographer.getInstance().removeFrameCallback(keyScrollFrameCallback)
+    private fun stopScrollLoop() {
+        if (!scrollLoopRunning) return
+        scrollLoopRunning = false
+        scrollLoopLastFrameNanos = 0L
+        scrollRemainder = 0f
+        Choreographer.getInstance().removeFrameCallback(scrollFrameCallback)
+    }
+
+    /**
+     * Scrolls continuously in [direction] (-1 up, 1 down) until [stopHoldScroll] is called.
+     */
+    private fun startHoldScroll(direction: Int) {
+        if (holdScrollDirection == direction) return
+        recycler.stopScroll()
+        holdScrollDirection = direction
+        scrollLoopLastFrameNanos = 0L
+        scrollRemainder = 0f
+        updateScrollLoop()
+    }
+
+    /**
+     * Ends a held scroll. Auto-scroll, if it was running underneath, resumes on the next frame.
+     */
+    private fun stopHoldScroll() {
+        if (holdScrollDirection == 0) return
+        holdScrollDirection = 0
+        scrollLoopLastFrameNanos = 0L
+        scrollRemainder = 0f
+        updateScrollLoop()
+    }
+
+    private fun setAutoScroll(enabled: Boolean) {
+        if (autoScrollActive == enabled) return
+        autoScrollActive = enabled
+        if (enabled) recycler.stopScroll()
+        scrollLoopLastFrameNanos = 0L
+        scrollRemainder = 0f
+        updateScrollLoop()
     }
 
     /**
@@ -361,8 +459,8 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
             return
         }
         when (event.action) {
-            KeyEvent.ACTION_DOWN -> startKeyScroll(if (forward) 1 else -1)
-            KeyEvent.ACTION_UP -> stopKeyScroll()
+            KeyEvent.ACTION_DOWN -> startHoldScroll(if (forward) 1 else -1)
+            KeyEvent.ACTION_UP -> stopHoldScroll()
         }
     }
 
@@ -379,7 +477,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 
         // Any key release ends an active hold-to-scroll, even if the branch below declines the
         // event (e.g. the menu opened mid-hold), so the frame loop can never be left running.
-        if (isUp && keyScrollDirection != 0) stopKeyScroll()
+        if (isUp) stopHoldScroll()
 
         when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
@@ -405,6 +503,18 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
             KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_PAGE_DOWN,
             -> handleScrollKey(event, forward = true)
+
+            // Unhandled by default, so they are free to claim for an external controller. Declined
+            // while the menu is open so they keep working for normal d-pad/keyboard navigation.
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_SPACE,
+            -> {
+                if (!config.autoScrollKeyToggle || activity.viewModel.state.value.menuVisible) {
+                    return false
+                }
+                if (isUp) setAutoScroll(!autoScrollActive)
+            }
             else -> return false
         }
         return true
@@ -435,10 +545,12 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
 private const val RECYCLER_VIEW_CACHE_SIZE = 4
 
-// Hold-to-scroll speed as screen heights per second. Constant for now; a user-facing speed
-// preference is planned alongside auto-scroll.
+// Hold-to-scroll speed as screen heights per second.
 private const val KEY_SCROLL_SCREENS_PER_SECOND = 1f
 
+// Auto-scroll speed is stored as hundredths of a screen height per second.
+private const val SCREEN_FRACTION_DENOMINATOR = 100f
+
 // Cap the per-frame time delta so a dropped frame or a paused app doesn't produce one huge jump.
-private const val KEY_SCROLL_MAX_FRAME_SECONDS = 0.1f
+private const val SCROLL_MAX_FRAME_SECONDS = 0.1f
 private const val NANOS_PER_SECOND = 1_000_000_000f
