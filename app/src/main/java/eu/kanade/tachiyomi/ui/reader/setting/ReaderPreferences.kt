@@ -93,6 +93,12 @@ class ReaderPreferences(
 
     val webtoonSidePadding: Preference<Int> = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)
 
+    /**
+     * When enabled, holding a scroll key (volume/d-pad/page keys) in the webtoon viewer scrolls
+     * continuously for as long as the key is held instead of jumping once on release.
+     */
+    val webtoonSmoothKeyScroll: Preference<Boolean> = preferenceStore.getBoolean("webtoon_smooth_key_scroll", false)
+
     val readerHideThreshold: Preference<ReaderHideThreshold> = preferenceStore.getEnum(
         "reader_hide_threshold",
         ReaderHideThreshold.LOW,

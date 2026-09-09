@@ -40,6 +40,9 @@ class WebtoonConfig(
 
     var doubleTapZoomChangedListener: ((Boolean) -> Unit)? = null
 
+    var smoothKeyScroll = false
+        private set
+
     val theme = readerPreferences.readerTheme.get()
 
     init {
@@ -88,6 +91,9 @@ class WebtoonConfig(
                 { doubleTapZoom = it },
                 { doubleTapZoomChangedListener?.invoke(it) },
             )
+
+        readerPreferences.webtoonSmoothKeyScroll
+            .register({ smoothKeyScroll = it })
 
         readerPreferences.readerTheme.changes()
             .drop(1)
