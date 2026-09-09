@@ -511,6 +511,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private fun setAutoScroll(enabled: Boolean) {
         if (autoScrollActive == enabled) return
         autoScrollActive = enabled
+        activity.viewModel.setAutoScrollActive(enabled)
         if (enabled) {
             autoScrollStartMillis = SystemClock.uptimeMillis()
             recycler.stopScroll()

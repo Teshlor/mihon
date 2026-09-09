@@ -332,6 +332,11 @@ class ReaderPreferences(
         const val AUTO_SCROLL_SPEED_MAX = 60
         const val AUTO_SCROLL_SPEED_DEFAULT = 10
 
+        // Presets offered by the on-screen indicator, for changing pace without opening settings.
+        const val AUTO_SCROLL_SPEED_SLOW = 5
+        const val AUTO_SCROLL_SPEED_MEDIUM = 10
+        const val AUTO_SCROLL_SPEED_FAST = 20
+
         // Hold-to-scroll speed, in hundredths of a screen height per second.
         const val HOLD_SCROLL_SPEED_MIN = 25
         const val HOLD_SCROLL_SPEED_MAX = 125

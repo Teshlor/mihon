@@ -74,8 +74,8 @@ import tachiyomi.domain.chapter.interactor.DeleteChapterBookmark
 import tachiyomi.domain.chapter.interactor.GetChapterBookmarksByMangaId
 import tachiyomi.domain.chapter.interactor.SetMangaDefaultChapterFlags
 import tachiyomi.domain.chapter.interactor.UpdateChapter
-import tachiyomi.domain.chapter.model.ChapterBookmarkWithChapter
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterBookmarkWithChapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.NoChaptersException
 import tachiyomi.domain.chapter.service.calculateChapterGap

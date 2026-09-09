@@ -630,6 +630,10 @@ class ReaderViewModel(
         )
     }
 
+    fun setAutoScrollActive(active: Boolean) {
+        mutableState.update { it.copy(autoScrollActive = active) }
+    }
+
     fun openChapterBookmarksDialog() {
         mutableState.update { it.copy(dialog = Dialog.ChapterBookmarks) }
     }
@@ -1074,6 +1078,12 @@ class ReaderViewModel(
         val dialog: Dialog? = null,
         val menuVisible: Boolean = false,
         @IntRange(from = -100, to = 100) val brightnessOverlayValue: Int = 0,
+
+        /**
+         * Whether the viewer is currently auto-scrolling. Reported by the viewer so the overlay can
+         * show an indicator, since auto-scroll otherwise has no visible sign it is running.
+         */
+        val autoScrollActive: Boolean = false,
     ) {
         val currentChapter: ReaderChapter?
             get() = viewerChapters?.currChapter

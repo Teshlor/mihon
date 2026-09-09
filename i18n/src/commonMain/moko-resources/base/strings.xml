@@ -91,6 +91,10 @@
     <string name="chapter_bookmark_entry">Page %1$d · %2$s in</string>
     <string name="action_edit_note">Edit note</string>
     <string name="information_no_manga_bookmarks">No bookmarked spots in this series yet</string>
+    <string name="auto_scroll_indicator">Auto-scrolling</string>
+    <string name="auto_scroll_speed_slow">Slow</string>
+    <string name="auto_scroll_speed_medium">Medium</string>
+    <string name="auto_scroll_speed_fast">Fast</string>
     <string name="action_update_library">Update library</string>
     <string name="action_enable_all">Enable all</string>
     <string name="action_disable_all">Disable all</string>

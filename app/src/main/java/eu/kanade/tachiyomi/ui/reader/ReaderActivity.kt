@@ -50,6 +50,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.transition.platform.MaterialContainerTransform
 import dev.zacsweers.metro.Inject
 import eu.kanade.domain.base.BasePreferences
+import eu.kanade.presentation.reader.AutoScrollIndicator
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.ReaderChapterBookmarksDialog
@@ -495,6 +496,13 @@ class ReaderActivity : BaseActivity() {
         if (flashOnPageChange) {
             DisplayRefreshHost(hostState = displayRefreshHost)
         }
+
+        val autoScrollSpeed by readerPreferences.webtoonAutoScrollSpeed.collectAsState()
+        AutoScrollIndicator(
+            visible = state.autoScrollActive,
+            currentSpeed = autoScrollSpeed,
+            onSelectSpeed = readerPreferences.webtoonAutoScrollSpeed::set,
+        )
     }
 
     @Composable
