@@ -118,6 +118,15 @@ class ReaderPreferences(
     )
 
     /**
+     * When enabled, three quick presses of volume up toggle auto-scroll. Only active while volume
+     * keys are already claimed for reading, so it never swallows a real volume change.
+     */
+    val webtoonAutoScrollVolumeTriplePress: Preference<Boolean> = preferenceStore.getBoolean(
+        "webtoon_auto_scroll_volume_triple_press",
+        false,
+    )
+
+    /**
      * Auto-scroll speed in hundredths of a screen height per second.
      */
     val webtoonAutoScrollSpeed: Preference<Int> = preferenceStore.getInt(

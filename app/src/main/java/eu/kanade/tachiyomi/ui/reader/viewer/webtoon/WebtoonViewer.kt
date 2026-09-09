@@ -99,6 +99,13 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private var scrollLoopLastFrameNanos = 0L
 
     /**
+     * Consecutive quick presses of volume up, used to detect the triple press that toggles
+     * auto-scroll. Reset whenever the gap between presses exceeds [MULTI_PRESS_WINDOW_MILLIS].
+     */
+    private var volumeUpPressCount = 0
+    private var volumeUpLastPressMillis = 0L
+
+    /**
      * Sub-pixel scroll carried over between frames so slow speeds don't round to zero.
      */
     private var scrollRemainder = 0f
@@ -439,6 +446,25 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         updateScrollLoop()
     }
 
+    /**
+     * Counts a volume up release and toggles auto-scroll on the third in quick succession. The
+     * presses still scroll as usual; suppressing them would either add latency to every single
+     * press or break rapid tapping as a way to page through a chapter.
+     */
+    private fun handleVolumeUpMultiPress(event: KeyEvent) {
+        val now = event.eventTime
+        volumeUpPressCount = if (now - volumeUpLastPressMillis <= MULTI_PRESS_WINDOW_MILLIS) {
+            volumeUpPressCount + 1
+        } else {
+            1
+        }
+        volumeUpLastPressMillis = now
+        if (volumeUpPressCount >= VOLUME_PRESSES_TO_TOGGLE) {
+            volumeUpPressCount = 0
+            setAutoScroll(!autoScrollActive)
+        }
+    }
+
     private fun setAutoScroll(enabled: Boolean) {
         if (autoScrollActive == enabled) return
         autoScrollActive = enabled
@@ -493,6 +519,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
                     return false
                 }
                 handleScrollKey(event, forward = config.volumeKeysInverted)
+                if (isUp && config.autoScrollVolumeTriplePress) handleVolumeUpMultiPress(event)
             }
             KeyEvent.KEYCODE_MENU -> if (isUp) activity.toggleMenu()
 
@@ -549,6 +576,10 @@ private const val RECYCLER_VIEW_CACHE_SIZE = 4
 
 // Both scroll speeds are stored as hundredths of a screen height per second.
 private const val SCREEN_FRACTION_DENOMINATOR = 100f
+
+// Maximum gap between consecutive volume up presses for them to count as one multi-press.
+private const val MULTI_PRESS_WINDOW_MILLIS = 400L
+private const val VOLUME_PRESSES_TO_TOGGLE = 3
 
 // Cap the per-frame time delta so a dropped frame or a paused app doesn't produce one huge jump.
 private const val SCROLL_MAX_FRAME_SECONDS = 0.1f

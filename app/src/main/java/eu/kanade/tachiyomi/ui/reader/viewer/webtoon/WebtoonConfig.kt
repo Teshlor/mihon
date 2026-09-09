@@ -51,6 +51,9 @@ class WebtoonConfig(
 
     var autoScrollKeyToggleChangedListener: ((Boolean) -> Unit)? = null
 
+    var autoScrollVolumeTriplePress = false
+        private set
+
     var autoScrollSpeed = ReaderPreferences.AUTO_SCROLL_SPEED_DEFAULT
         private set
 
@@ -114,6 +117,9 @@ class WebtoonConfig(
                 { autoScrollKeyToggle = it },
                 { autoScrollKeyToggleChangedListener?.invoke(it) },
             )
+
+        readerPreferences.webtoonAutoScrollVolumeTriplePress
+            .register({ autoScrollVolumeTriplePress = it })
 
         readerPreferences.webtoonAutoScrollSpeed
             .register({ autoScrollSpeed = it })
