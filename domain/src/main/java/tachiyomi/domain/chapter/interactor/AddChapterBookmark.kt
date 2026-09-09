@@ -8,7 +8,13 @@ class AddChapterBookmark(
     private val chapterBookmarkRepository: ChapterBookmarkRepository,
 ) {
 
-    suspend fun await(chapterId: Long, pageIndex: Int, pageOffset: Double, createdAt: Long) {
-        chapterBookmarkRepository.insert(chapterId, pageIndex, pageOffset, createdAt)
+    suspend fun await(
+        chapterId: Long,
+        pageIndex: Int,
+        pageOffset: Double,
+        createdAt: Long,
+        note: String? = null,
+    ) {
+        chapterBookmarkRepository.insert(chapterId, pageIndex, pageOffset, createdAt, note)
     }
 }

@@ -18,6 +18,7 @@ import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.repository.ChapterBookmarkRepository
 import tachiyomi.domain.manga.interactor.FetchInterval
 import tachiyomi.domain.manga.interactor.GetMangaByUrlAndSourceId
 import tachiyomi.domain.manga.model.Manga
@@ -37,6 +38,7 @@ class MangaRestorer(
     private val updateManga: UpdateManga,
     private val getTracks: GetTracks,
     private val insertTrack: InsertTrack,
+    private val chapterBookmarkRepository: ChapterBookmarkRepository,
     fetchInterval: FetchInterval,
 ) {
 
@@ -186,6 +188,39 @@ class MangaRestorer(
 
         insertNewChapters(newChapters)
         updateExistingChapters(existingChapters)
+        restoreChapterBookmarks(manga, backupChapters)
+    }
+
+    /**
+     * Restores bookmarked spots after their chapters exist, since a chapter's row id is only known
+     * once it has been written and is resolved here by url.
+     *
+     * Entries already present are skipped so restoring the same backup twice does not duplicate
+     * them; a bookmark is treated as the same one when it shares a page and creation time.
+     */
+    private suspend fun restoreChapterBookmarks(manga: Manga, backupChapters: List<BackupChapter>) {
+        val backupChaptersWithBookmarks = backupChapters.filter { it.bookmarks.isNotEmpty() }
+        if (backupChaptersWithBookmarks.isEmpty()) return
+
+        val dbChapterIdsByUrl = getChaptersByMangaId.await(manga.id)
+            .associate { it.url to it.id }
+
+        backupChaptersWithBookmarks.forEach { backupChapter ->
+            val chapterId = dbChapterIdsByUrl[backupChapter.url] ?: return@forEach
+            val existing = chapterBookmarkRepository.getByChapterId(chapterId)
+                .mapTo(mutableSetOf()) { it.pageIndex to it.createdAt }
+
+            backupChapter.bookmarks.forEach bookmark@{ bookmark ->
+                if ((bookmark.pageIndex to bookmark.createdAt) in existing) return@bookmark
+                chapterBookmarkRepository.insert(
+                    chapterId = chapterId,
+                    pageIndex = bookmark.pageIndex,
+                    pageOffset = bookmark.pageOffset,
+                    createdAt = bookmark.createdAt,
+                    note = bookmark.note,
+                )
+            }
+        }
     }
 
     private fun Chapter.forComparison() =

@@ -80,6 +80,7 @@ import tachiyomi.domain.chapter.interactor.DeleteChapterBookmark
 import tachiyomi.domain.chapter.interactor.GetChapterBookmarks
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
+import tachiyomi.domain.chapter.interactor.UpdateChapterBookmarkNote
 import tachiyomi.domain.chapter.model.ChapterBookmark
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.service.getChapterSort
@@ -120,6 +121,7 @@ class ReaderViewModel(
     private val getChapterBookmarks: GetChapterBookmarks,
     private val addChapterBookmark: AddChapterBookmark,
     private val deleteChapterBookmark: DeleteChapterBookmark,
+    private val updateChapterBookmarkNote: UpdateChapterBookmarkNote,
     private val setMangaViewerFlags: SetMangaViewerFlags,
     private val getIncognitoState: GetIncognitoState,
     private val libraryPreferences: LibraryPreferences,
@@ -647,6 +649,10 @@ class ReaderViewModel(
 
     suspend fun removeChapterBookmark(id: Long) {
         deleteChapterBookmark.await(id)
+    }
+
+    suspend fun setChapterBookmarkNote(id: Long, note: String?) {
+        updateChapterBookmarkNote.await(id, note)
     }
 
     /**

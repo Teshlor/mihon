@@ -358,6 +358,12 @@ class ReaderActivity : BaseActivity() {
                             reloadTrigger++
                         }
                     },
+                    onEditNote = { bookmark, note ->
+                        lifecycleScope.launchNonCancellable {
+                            viewModel.setChapterBookmarkNote(bookmark.id, note)
+                            reloadTrigger++
+                        }
+                    },
                 )
             }
             null -> {}

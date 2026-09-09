@@ -15,4 +15,17 @@ data class ChapterBookmark(
      */
     val pageOffset: Double,
     val createdAt: Long,
+    /**
+     * Optional label. Null for spots saved without one, which is the quick one-tap path.
+     */
+    val note: String? = null,
+)
+
+/**
+ * A bookmark together with the chapter it belongs to, for listing across a whole series.
+ */
+data class ChapterBookmarkWithChapter(
+    val bookmark: ChapterBookmark,
+    val chapterUrl: String,
+    val chapterName: String,
 )

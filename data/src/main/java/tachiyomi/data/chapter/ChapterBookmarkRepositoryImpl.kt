@@ -9,6 +9,7 @@ import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.Database
 import tachiyomi.domain.chapter.model.ChapterBookmark
+import tachiyomi.domain.chapter.model.ChapterBookmarkWithChapter
 import tachiyomi.domain.chapter.repository.ChapterBookmarkRepository
 
 @Inject
@@ -29,14 +30,40 @@ class ChapterBookmarkRepositoryImpl(
         }
     }
 
-    override suspend fun insert(chapterId: Long, pageIndex: Int, pageOffset: Double, createdAt: Long) {
+    override suspend fun getByMangaId(mangaId: Long): List<ChapterBookmarkWithChapter> {
+        return try {
+            database.chapterBookmarksQueries
+                .getByMangaId(mangaId, ::mapChapterBookmarkWithChapter)
+                .awaitAsList()
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            emptyList()
+        }
+    }
+
+    override suspend fun insert(
+        chapterId: Long,
+        pageIndex: Int,
+        pageOffset: Double,
+        createdAt: Long,
+        note: String?,
+    ) {
         try {
             database.chapterBookmarksQueries.insert(
                 chapterId = chapterId,
                 pageIndex = pageIndex.toLong(),
                 pageOffset = pageOffset,
                 createdAt = createdAt,
+                note = note,
             )
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+        }
+    }
+
+    override suspend fun updateNote(id: Long, note: String?) {
+        try {
+            database.chapterBookmarksQueries.updateNote(note = note, id = id)
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
         }
@@ -56,11 +83,36 @@ class ChapterBookmarkRepositoryImpl(
         pageIndex: Long,
         pageOffset: Double,
         createdAt: Long,
+        note: String?,
     ): ChapterBookmark = ChapterBookmark(
         id = id,
         chapterId = chapterId,
         pageIndex = pageIndex.toInt(),
         pageOffset = pageOffset,
         createdAt = createdAt,
+        note = note,
+    )
+
+    @Suppress("LongParameterList")
+    private fun mapChapterBookmarkWithChapter(
+        id: Long,
+        chapterId: Long,
+        pageIndex: Long,
+        pageOffset: Double,
+        createdAt: Long,
+        note: String?,
+        chapterUrl: String,
+        chapterName: String,
+    ): ChapterBookmarkWithChapter = ChapterBookmarkWithChapter(
+        bookmark = ChapterBookmark(
+            id = id,
+            chapterId = chapterId,
+            pageIndex = pageIndex.toInt(),
+            pageOffset = pageOffset,
+            createdAt = createdAt,
+            note = note,
+        ),
+        chapterUrl = chapterUrl,
+        chapterName = chapterName,
     )
 }
