@@ -242,10 +242,22 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
         label = stringResource(MR.strings.pref_webtoon_disable_zoom_out),
         pref = viewModel.preferences.webtoonDisableZoomOut,
     )
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_webtoon_smooth_key_scroll),
-        pref = viewModel.preferences.webtoonSmoothKeyScroll,
-    )
+    // The on/off switch for this lives in Settings > Reader > Navigation, alongside the volume
+    // key options. Only the speed is offered here, for adjustment without leaving the reader.
+    val smoothKeyScroll by viewModel.preferences.webtoonSmoothKeyScroll.collectAsState()
+    if (smoothKeyScroll) {
+        val smoothKeyScrollSpeed by viewModel.preferences.webtoonSmoothKeyScrollSpeed.collectAsState()
+        SliderItem(
+            value = smoothKeyScrollSpeed,
+            valueRange = ReaderPreferences.let { it.HOLD_SCROLL_SPEED_MIN..it.HOLD_SCROLL_SPEED_MAX },
+            label = stringResource(MR.strings.pref_webtoon_smooth_key_scroll_speed),
+            valueString = numberFormat.format(smoothKeyScrollSpeed / 100f),
+            onChange = {
+                viewModel.preferences.webtoonSmoothKeyScrollSpeed.set(it)
+            },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
 
     val autoScrollKeyToggle by viewModel.preferences.webtoonAutoScrollKeyToggle.collectAsState()
     CheckboxItem(

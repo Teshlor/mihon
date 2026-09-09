@@ -381,8 +381,15 @@ object SettingsReaderScreen : SearchableSettings {
 
     @Composable
     private fun getNavigationGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
+        val numberFormat = remember { NumberFormat.getPercentInstance() }
+
         val readWithVolumeKeysPref = readerPreferences.readWithVolumeKeys
         val readWithVolumeKeys by readWithVolumeKeysPref.collectAsState()
+
+        val smoothKeyScrollPref = readerPreferences.webtoonSmoothKeyScroll
+        val smoothKeyScroll by smoothKeyScrollPref.collectAsState()
+        val smoothKeyScrollSpeedPref = readerPreferences.webtoonSmoothKeyScrollSpeed
+        val smoothKeyScrollSpeed by smoothKeyScrollSpeedPref.collectAsState()
 
         val verticalNavigator by readerPreferences.verticalNavigator.collectAsState()
         val verticalNavigatorHeightPref = readerPreferences.verticalNavigatorHeight
@@ -399,6 +406,20 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.readWithVolumeKeysInverted,
                     title = stringResource(MR.strings.pref_read_with_volume_keys_inverted),
                     enabled = readWithVolumeKeys,
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = smoothKeyScrollPref,
+                    title = stringResource(MR.strings.pref_webtoon_smooth_key_scroll),
+                ),
+                Preference.PreferenceItem.SliderPreference(
+                    value = smoothKeyScrollSpeed,
+                    valueRange = ReaderPreferences.let {
+                        it.HOLD_SCROLL_SPEED_MIN..it.HOLD_SCROLL_SPEED_MAX
+                    },
+                    title = stringResource(MR.strings.pref_webtoon_smooth_key_scroll_speed),
+                    valueString = numberFormat.format(smoothKeyScrollSpeed / 100f),
+                    onValueChanged = { smoothKeyScrollSpeedPref.set(it) },
+                    enabled = smoothKeyScroll,
                 ),
                 Preference.PreferenceItem.MultiSelectListPreference(
                     preference = readerPreferences.verticalNavigator,
