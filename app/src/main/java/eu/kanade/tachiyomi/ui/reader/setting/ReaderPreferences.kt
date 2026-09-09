@@ -100,6 +100,14 @@ class ReaderPreferences(
     val webtoonSmoothKeyScroll: Preference<Boolean> = preferenceStore.getBoolean("webtoon_smooth_key_scroll", false)
 
     /**
+     * Hold-to-scroll speed in hundredths of a screen height per second.
+     */
+    val webtoonSmoothKeyScrollSpeed: Preference<Int> = preferenceStore.getInt(
+        "webtoon_smooth_key_scroll_speed",
+        HOLD_SCROLL_SPEED_DEFAULT,
+    )
+
+    /**
      * When enabled, DPAD_CENTER / ENTER / SPACE toggle webtoon auto-scroll on and off. These
      * keycodes are otherwise unhandled by the viewer, which makes them bindable from an external
      * controller such as a Bluetooth ring.
@@ -314,6 +322,11 @@ class ReaderPreferences(
         const val AUTO_SCROLL_SPEED_MIN = 2
         const val AUTO_SCROLL_SPEED_MAX = 60
         const val AUTO_SCROLL_SPEED_DEFAULT = 10
+
+        // Hold-to-scroll speed, in hundredths of a screen height per second.
+        const val HOLD_SCROLL_SPEED_MIN = 25
+        const val HOLD_SCROLL_SPEED_MAX = 125
+        const val HOLD_SCROLL_SPEED_DEFAULT = 75
 
         const val MILLI_CONVERSION = 100
 

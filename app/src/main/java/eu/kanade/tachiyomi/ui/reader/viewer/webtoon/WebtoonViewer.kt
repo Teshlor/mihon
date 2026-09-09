@@ -78,9 +78,11 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private val screenHeight = activity.resources.displayMetrics.heightPixels
 
     /**
-     * Pixels per second scrolled while a scroll key is held and [WebtoonConfig.smoothKeyScroll] is on.
+     * Pixels per second scrolled while a scroll key is held and [WebtoonConfig.smoothKeyScroll] is
+     * on. Read per frame so slider changes apply without reopening the reader.
      */
-    private val keyScrollVelocity = screenHeight * KEY_SCROLL_SCREENS_PER_SECOND
+    private val keyScrollVelocity: Float
+        get() = screenHeight * config.smoothKeyScrollSpeed / SCREEN_FRACTION_DENOMINATOR
 
     /**
      * Direction of the active hold-to-scroll: -1 up, 1 down, 0 idle.
@@ -545,10 +547,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
 private const val RECYCLER_VIEW_CACHE_SIZE = 4
 
-// Hold-to-scroll speed as screen heights per second.
-private const val KEY_SCROLL_SCREENS_PER_SECOND = 1f
-
-// Auto-scroll speed is stored as hundredths of a screen height per second.
+// Both scroll speeds are stored as hundredths of a screen height per second.
 private const val SCREEN_FRACTION_DENOMINATOR = 100f
 
 // Cap the per-frame time delta so a dropped frame or a paused app doesn't produce one huge jump.

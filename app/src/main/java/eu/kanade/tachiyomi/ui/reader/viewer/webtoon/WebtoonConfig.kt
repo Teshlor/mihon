@@ -43,6 +43,9 @@ class WebtoonConfig(
     var smoothKeyScroll = false
         private set
 
+    var smoothKeyScrollSpeed = ReaderPreferences.HOLD_SCROLL_SPEED_DEFAULT
+        private set
+
     var autoScrollKeyToggle = false
         private set
 
@@ -102,6 +105,9 @@ class WebtoonConfig(
 
         readerPreferences.webtoonSmoothKeyScroll
             .register({ smoothKeyScroll = it })
+
+        readerPreferences.webtoonSmoothKeyScrollSpeed
+            .register({ smoothKeyScrollSpeed = it })
 
         readerPreferences.webtoonAutoScrollKeyToggle
             .register(
