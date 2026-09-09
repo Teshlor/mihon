@@ -551,23 +551,41 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     }
 
     /**
+     * Moves to [page] and then [offsetFraction] of the way down it.
+     */
+    override fun moveToPageWithOffset(page: ReaderPage, offsetFraction: Double) {
+        moveToPage(page)
+        if (offsetFraction <= 0.0) return
+        pendingRestorePage = page
+        pendingRestoreFraction = offsetFraction
+        // Covers the case where the image is already decoded, so no decode callback is coming.
+        recycler.post { applyPendingRestore() }
+    }
+
+    /**
      * Called by a page holder once its image has decoded and the view has its real height. This is
      * the earliest point at which a saved fractional offset can be turned into a pixel distance.
      */
     fun onPageImageDecoded(page: ReaderPage) {
         if (page !== pendingRestorePage) return
+        recycler.post { applyPendingRestore() }
+    }
+
+    /**
+     * Applies a pending offset if its page is laid out with a real height, and leaves it pending
+     * otherwise so a later decode or layout can retry.
+     */
+    private fun applyPendingRestore() {
+        val page = pendingRestorePage ?: return
+        val position = adapter.items.indexOf(page)
+        if (position == RecyclerView.NO_POSITION) return
+        val view = layoutManager.findViewByPosition(position) ?: return
+        if (view.height <= 0) return
+
         val fraction = pendingRestoreFraction
         pendingRestorePage = null
         pendingRestoreFraction = 0.0
-        if (fraction <= 0.0) return
-
-        val position = adapter.items.indexOf(page)
-        if (position == RecyclerView.NO_POSITION) return
-        recycler.post {
-            val view = layoutManager.findViewByPosition(position) ?: return@post
-            if (view.height <= 0) return@post
-            recycler.scrollBy(0, view.top + (fraction * view.height).toInt())
-        }
+        recycler.scrollBy(0, view.top + (fraction * view.height).toInt())
     }
 
     /**

@@ -75,8 +75,12 @@ import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.chapter.interactor.AddChapterBookmark
+import tachiyomi.domain.chapter.interactor.DeleteChapterBookmark
+import tachiyomi.domain.chapter.interactor.GetChapterBookmarks
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
+import tachiyomi.domain.chapter.model.ChapterBookmark
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.download.service.DownloadPreferences
@@ -113,6 +117,9 @@ class ReaderViewModel(
     private val getNextChapters: GetNextChapters,
     private val upsertHistory: UpsertHistory,
     private val updateChapter: UpdateChapter,
+    private val getChapterBookmarks: GetChapterBookmarks,
+    private val addChapterBookmark: AddChapterBookmark,
+    private val deleteChapterBookmark: DeleteChapterBookmark,
     private val setMangaViewerFlags: SetMangaViewerFlags,
     private val getIncognitoState: GetIncognitoState,
     private val libraryPreferences: LibraryPreferences,
@@ -613,6 +620,45 @@ class ReaderViewModel(
         )
     }
 
+    fun openChapterBookmarksDialog() {
+        mutableState.update { it.copy(dialog = Dialog.ChapterBookmarks) }
+    }
+
+    /**
+     * Bookmarks the spot the reader is currently looking at, which is the selected page plus how
+     * far into it the viewer has scrolled.
+     */
+    suspend fun bookmarkCurrentPosition(pageOffset: Double) {
+        val readerChapter = getCurrentChapter() ?: return
+        val chapterId = readerChapter.chapter.id ?: return
+        val pageIndex = (state.value.currentPage - 1).coerceAtLeast(0)
+        addChapterBookmark.await(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            pageOffset = pageOffset,
+            createdAt = Clock.System.now().toEpochMilliseconds(),
+        )
+    }
+
+    suspend fun getCurrentChapterBookmarks(): List<ChapterBookmark> {
+        val chapterId = getCurrentChapter()?.chapter?.id ?: return emptyList()
+        return getChapterBookmarks.await(chapterId)
+    }
+
+    suspend fun removeChapterBookmark(id: Long) {
+        deleteChapterBookmark.await(id)
+    }
+
+    /**
+     * Returns the page a [bookmark] points at, if it belongs to the chapter currently open.
+     */
+    fun pageForBookmark(bookmark: ChapterBookmark): ReaderPage? {
+        val readerChapter = getCurrentChapter() ?: return null
+        if (readerChapter.chapter.id != bookmark.chapterId) return null
+        val pages = readerChapter.pages ?: return null
+        return pages.getOrNull(bookmark.pageIndex)
+    }
+
     private suspend fun updateChapterProgressOnComplete(readerChapter: ReaderChapter) {
         readerChapter.chapter.read = true
         updateTrackChapterRead(readerChapter)
@@ -1028,6 +1074,7 @@ class ReaderViewModel(
         data object ReadingModeSelect : Dialog
         data object OrientationModeSelect : Dialog
         data class PageActions(val page: ReaderPage) : Dialog
+        data object ChapterBookmarks : Dialog
     }
 
     sealed interface Event {

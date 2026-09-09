@@ -38,6 +38,12 @@ interface Viewer {
     fun currentPageOffsetFraction(): Double = 0.0
 
     /**
+     * Moves to [page] and then [offsetFraction] of the way down it. Viewers that cannot scroll
+     * within a page just move to the page.
+     */
+    fun moveToPageWithOffset(page: ReaderPage, offsetFraction: Double) = moveToPage(page)
+
+    /**
      * Called from the containing activity when a key [event] is received. It should return true
      * if the event was handled, false otherwise.
      */

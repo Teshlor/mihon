@@ -1,0 +1,26 @@
+CREATE TABLE chapter_bookmarks(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    chapter_id INTEGER NOT NULL,
+    page_index INTEGER NOT NULL,
+    -- How far into page_index the spot is, as a fraction of that page's height.
+    page_offset REAL NOT NULL DEFAULT 0.0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(chapter_id) REFERENCES chapters (_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX chapter_bookmarks_chapter_id_index ON chapter_bookmarks(chapter_id);
+
+getByChapterId:
+SELECT *
+FROM chapter_bookmarks
+WHERE chapter_id = :chapterId
+ORDER BY page_index ASC, page_offset ASC;
+
+insert:
+INSERT INTO chapter_bookmarks(chapter_id, page_index, page_offset, created_at)
+VALUES (:chapterId, :pageIndex, :pageOffset, :createdAt);
+
+deleteById:
+DELETE FROM chapter_bookmarks
+WHERE _id = :id;

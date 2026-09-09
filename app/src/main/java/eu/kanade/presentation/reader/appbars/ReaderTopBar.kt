@@ -21,6 +21,7 @@ fun ReaderTopBar(
     onOpenInWebView: (() -> Unit)?,
     onOpenInBrowser: (() -> Unit)?,
     onShare: (() -> Unit)?,
+    onOpenChapterBookmarks: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AppBar(
@@ -47,6 +48,12 @@ fun ReaderTopBar(
                                 MaterialSymbols.Rounded.Bookmark
                             },
                             onClick = onToggleBookmarked,
+                        ),
+                    )
+                    add(
+                        AppBar.OverflowAction(
+                            title = stringResource(MR.strings.action_chapter_bookmarks),
+                            onClick = onOpenChapterBookmarks,
                         ),
                     )
                     onOpenInWebView?.let {

@@ -85,6 +85,10 @@
     <string name="action_bookmark">Bookmark chapter</string>
     <string name="action_remove_bookmark">Unbookmark chapter</string>
     <string name="action_delete">Delete</string>
+    <string name="action_bookmark_spot">Bookmark spot</string>
+    <string name="action_chapter_bookmarks">Bookmarks in chapter</string>
+    <string name="information_no_chapter_bookmarks">No bookmarks in this chapter yet</string>
+    <string name="chapter_bookmark_entry">Page %1$d · %2$s in</string>
     <string name="action_update_library">Update library</string>
     <string name="action_enable_all">Enable all</string>
     <string name="action_disable_all">Disable all</string>

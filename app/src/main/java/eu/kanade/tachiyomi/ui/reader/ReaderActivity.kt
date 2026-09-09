@@ -29,9 +29,13 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -48,6 +52,7 @@ import dev.zacsweers.metro.Inject
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
+import eu.kanade.presentation.reader.ReaderChapterBookmarksDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
 import eu.kanade.presentation.reader.ReaderPageIndicator
@@ -98,6 +103,7 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.chapter.model.ChapterBookmark
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.util.collectAsState
 import kotlin.time.Duration.Companion.seconds
@@ -327,6 +333,31 @@ class ReaderActivity : BaseActivity() {
                     onSetAsCover = viewModel::setAsCover,
                     onShare = viewModel::shareImage,
                     onSave = viewModel::saveImage,
+                    onBookmarkSpot = ::bookmarkCurrentSpot,
+                )
+            }
+            is ReaderViewModel.Dialog.ChapterBookmarks -> {
+                var bookmarks by remember { mutableStateOf(emptyList<ChapterBookmark>()) }
+                var reloadTrigger by remember { mutableIntStateOf(0) }
+                LaunchedEffect(reloadTrigger) {
+                    bookmarks = viewModel.getCurrentChapterBookmarks()
+                }
+                ReaderChapterBookmarksDialog(
+                    bookmarks = bookmarks,
+                    onDismissRequest = onDismissRequest,
+                    onJumpTo = { bookmark ->
+                        onDismissRequest()
+                        val page = viewModel.pageForBookmark(bookmark)
+                        if (page != null) {
+                            viewModel.state.value.viewer?.moveToPageWithOffset(page, bookmark.pageOffset)
+                        }
+                    },
+                    onDelete = { bookmark ->
+                        lifecycleScope.launchNonCancellable {
+                            viewModel.removeChapterBookmark(bookmark.id)
+                            reloadTrigger++
+                        }
+                    },
                 )
             }
             null -> {}
@@ -476,6 +507,7 @@ class ReaderActivity : BaseActivity() {
             onOpenInWebView = ::openChapterInWebView.takeIf { isHttpSource },
             onOpenInBrowser = ::openChapterInBrowser.takeIf { isHttpSource },
             onShare = ::shareChapter.takeIf { isHttpSource },
+            onOpenChapterBookmarks = viewModel::openChapterBookmarksDialog,
 
             chapterNavigatorType = if (!verticalNavigator) {
                 if (state.viewer is R2LPagerViewer || (state.viewer as? WebGpuViewer)?.isReversed ?: false) {
@@ -701,6 +733,17 @@ class ReaderActivity : BaseActivity() {
      */
     fun onPageLongTap(page: ReaderPage) {
         viewModel.openPageDialog(page)
+    }
+
+    /**
+     * Bookmarks whatever the reader is currently looking at, taking the scroll position from the
+     * viewer so the spot is recorded mid-page rather than at the top of it.
+     */
+    private fun bookmarkCurrentSpot() {
+        val offset = viewModel.state.value.viewer?.currentPageOffsetFraction() ?: 0.0
+        lifecycleScope.launchNonCancellable {
+            viewModel.bookmarkCurrentPosition(offset)
+        }
     }
 
     /**
