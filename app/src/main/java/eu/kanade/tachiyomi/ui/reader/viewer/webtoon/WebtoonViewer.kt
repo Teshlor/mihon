@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.graphics.PointF
+import android.os.SystemClock
 import android.view.Choreographer
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -95,6 +96,12 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      */
     private var autoScrollActive = false
 
+    /**
+     * When auto-scroll was last engaged, used to ease it in. Not reset when a held key
+     * temporarily overrides it, so releasing the key resumes at full speed.
+     */
+    private var autoScrollStartMillis = 0L
+
     private var scrollLoopRunning = false
     private var scrollLoopLastFrameNanos = 0L
 
@@ -111,23 +118,41 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private var scrollRemainder = 0f
 
     /**
+     * Whether anything currently wants the frame loop running. Kept separate from
+     * [activeScrollVelocity] because that is momentarily zero while auto-scroll eases in.
+     */
+    private val scrollLoopWanted: Boolean
+        get() = holdScrollDirection != 0 || autoScrollActive
+
+    /**
+     * Fraction of the target auto-scroll speed to apply, easing linearly from a standstill over
+     * [AUTO_SCROLL_RAMP_MILLIS] so engaging it glides rather than lurches.
+     */
+    private val autoScrollRampFactor: Float
+        get() {
+            val elapsed = SystemClock.uptimeMillis() - autoScrollStartMillis
+            return (elapsed.toFloat() / AUTO_SCROLL_RAMP_MILLIS).coerceIn(0f, 1f)
+        }
+
+    /**
      * Signed pixels per second the frame loop should currently scroll by, or zero when idle.
      * A held key wins over auto-scroll so manual navigation stays responsive.
      */
     private val activeScrollVelocity: Float
         get() = when {
             holdScrollDirection != 0 -> holdScrollDirection * keyScrollVelocity
-            autoScrollActive -> screenHeight * config.autoScrollSpeed / SCREEN_FRACTION_DENOMINATOR
+            autoScrollActive ->
+                screenHeight * config.autoScrollSpeed / SCREEN_FRACTION_DENOMINATOR * autoScrollRampFactor
             else -> 0f
         }
 
     private val scrollFrameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            val velocity = activeScrollVelocity
-            if (velocity == 0f) {
+            if (!scrollLoopWanted) {
                 stopScrollLoop()
                 return
             }
+            val velocity = activeScrollVelocity
             if (scrollLoopLastFrameNanos != 0L) {
                 val dtSeconds = ((frameTimeNanos - scrollLoopLastFrameNanos) / NANOS_PER_SECOND)
                     .coerceAtMost(SCROLL_MAX_FRAME_SECONDS)
@@ -404,7 +429,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * otherwise. Safe to call whenever hold or auto-scroll state changes.
      */
     private fun updateScrollLoop() {
-        if (activeScrollVelocity != 0f) {
+        if (scrollLoopWanted) {
             if (scrollLoopRunning) return
             scrollLoopRunning = true
             scrollLoopLastFrameNanos = 0L
@@ -468,7 +493,10 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private fun setAutoScroll(enabled: Boolean) {
         if (autoScrollActive == enabled) return
         autoScrollActive = enabled
-        if (enabled) recycler.stopScroll()
+        if (enabled) {
+            autoScrollStartMillis = SystemClock.uptimeMillis()
+            recycler.stopScroll()
+        }
         scrollLoopLastFrameNanos = 0L
         scrollRemainder = 0f
         updateScrollLoop()
@@ -572,6 +600,9 @@ private const val RECYCLER_VIEW_CACHE_SIZE = 4
 
 // Both scroll speeds are stored as hundredths of a screen height per second.
 private const val SCREEN_FRACTION_DENOMINATOR = 100f
+
+// How long auto-scroll takes to ease from a standstill up to the configured speed.
+private const val AUTO_SCROLL_RAMP_MILLIS = 750f
 
 // Maximum gap between consecutive volume up presses for them to count as one multi-press.
 private const val MULTI_PRESS_WINDOW_MILLIS = 400L
