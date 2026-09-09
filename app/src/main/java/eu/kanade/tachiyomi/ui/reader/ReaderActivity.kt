@@ -113,10 +113,22 @@ class ReaderActivity : BaseActivity() {
     private val graph: AppGraph by lazy { metroGraph() }
 
     companion object {
-        fun newIntent(context: Context, mangaId: Long?, chapterId: Long?): Intent {
+        /**
+         * [pageIndex] and [pageOffset] open the chapter at a specific spot rather than where
+         * reading last stopped, which is how a saved bookmark is followed.
+         */
+        fun newIntent(
+            context: Context,
+            mangaId: Long?,
+            chapterId: Long?,
+            pageIndex: Int? = null,
+            pageOffset: Double? = null,
+        ): Intent {
             return Intent(context, ReaderActivity::class.java).apply {
                 putExtra("manga", mangaId)
                 putExtra("chapter", chapterId)
+                pageIndex?.let { putExtra("page_index", it) }
+                pageOffset?.let { putExtra("page_offset", it) }
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
         }

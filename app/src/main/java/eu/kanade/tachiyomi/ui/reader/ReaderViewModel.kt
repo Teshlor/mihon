@@ -181,6 +181,8 @@ class ReaderViewModel(
     /**
      * The visible page index of the currently loaded chapter. Used to restore from process kill.
      */
+    private var pendingInitialPageOffset = savedState.get<Double>("page_offset") ?: 0.0
+
     private var chapterPageIndex = savedState.get<Int>("page_index") ?: -1
         set(value) {
             savedState["page_index"] = value
@@ -291,6 +293,12 @@ class ReaderViewModel(
                 if (chapterPageIndex >= 0) {
                     // Restore from SavedState
                     currentChapter.requestedPage = chapterPageIndex
+                    // Only set when opened at a specific spot, such as following a bookmark, and
+                    // consumed once so later chapters resume normally.
+                    if (pendingInitialPageOffset > 0.0) {
+                        currentChapter.requestedPageOffset = pendingInitialPageOffset
+                        pendingInitialPageOffset = 0.0
+                    }
                 } else if (!currentChapter.chapter.read) {
                     currentChapter.requestedPage = currentChapter.chapter.last_page_read
                     currentChapter.requestedPageOffset = currentChapter.chapter.last_page_offset
