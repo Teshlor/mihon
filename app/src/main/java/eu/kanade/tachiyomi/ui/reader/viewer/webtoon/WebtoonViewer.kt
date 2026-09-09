@@ -300,6 +300,10 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * if the event was handled, false otherwise.
      */
     override fun handleKeyEvent(event: KeyEvent): Boolean {
+        // TODO(temporary): remove before merging. Logs raw key events so external controllers
+        // (e.g. Bluetooth rings) can be identified with `adb logcat -s WebtoonViewer`.
+        logcat { "handleKeyEvent keyCode=${event.keyCode} action=${event.action} repeat=${event.repeatCount}" }
+
         val isUp = event.action == KeyEvent.ACTION_UP
 
         when (event.keyCode) {
