@@ -43,6 +43,14 @@ class WebtoonConfig(
     var smoothKeyScroll = false
         private set
 
+    var autoScrollKeyToggle = false
+        private set
+
+    var autoScrollKeyToggleChangedListener: ((Boolean) -> Unit)? = null
+
+    var autoScrollSpeed = ReaderPreferences.AUTO_SCROLL_SPEED_DEFAULT
+        private set
+
     val theme = readerPreferences.readerTheme.get()
 
     init {
@@ -94,6 +102,15 @@ class WebtoonConfig(
 
         readerPreferences.webtoonSmoothKeyScroll
             .register({ smoothKeyScroll = it })
+
+        readerPreferences.webtoonAutoScrollKeyToggle
+            .register(
+                { autoScrollKeyToggle = it },
+                { autoScrollKeyToggleChangedListener?.invoke(it) },
+            )
+
+        readerPreferences.webtoonAutoScrollSpeed
+            .register({ autoScrollSpeed = it })
 
         readerPreferences.readerTheme.changes()
             .drop(1)
