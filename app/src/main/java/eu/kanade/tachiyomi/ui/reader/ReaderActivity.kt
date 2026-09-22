@@ -48,6 +48,7 @@ import dev.zacsweers.metro.Inject
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
+import eu.kanade.presentation.reader.PageTranslationOverlay
 import eu.kanade.presentation.reader.ReaderContentOverlay
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
 import eu.kanade.presentation.reader.ReaderPageIndicator
@@ -72,6 +73,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import eu.kanade.tachiyomi.ui.reader.translation.ReaderTranslationHost
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewer
@@ -133,6 +135,7 @@ class ReaderActivity : BaseActivity() {
     private var menuToggleToast: Toast? = null
     private var readingModeToast: Toast? = null
     private val displayRefreshHost = DisplayRefreshHost()
+    private val translationHost by lazy { ReaderTranslationHost(this, readerPreferences) }
 
     private val windowInsetsController by lazy { WindowInsetsControllerCompat(window, window.decorView) }
 
@@ -271,6 +274,12 @@ class ReaderActivity : BaseActivity() {
 
             ContentOverlay(state = state)
 
+            val translationState by translationHost.state.collectAsState()
+            PageTranslationOverlay(
+                state = translationState,
+                onDismiss = translationHost::dismiss,
+            )
+
             AppBars(state = state)
         }
 
@@ -338,6 +347,7 @@ class ReaderActivity : BaseActivity() {
      */
     override fun onDestroy() {
         super.onDestroy()
+        translationHost.destroy()
         viewModel.state.value.viewer?.destroy()
         config = null
         menuToggleToast?.cancel()
@@ -411,6 +421,8 @@ class ReaderActivity : BaseActivity() {
      * Dispatches a key event. If the viewer doesn't handle it, call the default implementation.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // A translation only fits the view it was made for, so any navigation hides it.
+        translationHost.dismiss()
         val handled = viewModel.state.value.viewer?.handleKeyEvent(event) ?: false
         return handled || super.dispatchKeyEvent(event)
     }
@@ -474,6 +486,7 @@ class ReaderActivity : BaseActivity() {
             onOpenInWebView = ::openChapterInWebView.takeIf { isHttpSource },
             onOpenInBrowser = ::openChapterInBrowser.takeIf { isHttpSource },
             onShare = ::shareChapter.takeIf { isHttpSource },
+            onTranslate = { translationHost.translateScreen(binding.readerContainer, binding.composeOverlay) },
 
             chapterNavigatorType = if (!verticalNavigator) {
                 if (state.viewer is R2LPagerViewer || (state.viewer as? WebGpuViewer)?.isReversed ?: false) {
@@ -690,6 +703,7 @@ class ReaderActivity : BaseActivity() {
      * bottom menu and delegates the change to the presenter.
      */
     fun onPageSelected(page: ReaderPage) {
+        translationHost.dismiss()
         viewModel.onPageSelected(page)
     }
 

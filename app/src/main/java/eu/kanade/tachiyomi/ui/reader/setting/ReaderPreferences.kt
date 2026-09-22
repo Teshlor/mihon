@@ -95,6 +95,16 @@ class ReaderPreferences(
      */
     val panelNavigation: Preference<Boolean> = preferenceStore.getBoolean("pager_panel_navigation", false)
 
+    /**
+     * Language that pages are written in, for translating them. A BCP 47 tag.
+     */
+    val translationSourceLanguage: Preference<String> = preferenceStore.getString("reader_translation_source", "ja")
+
+    /**
+     * Language to translate pages into, as a BCP 47 tag. Empty means the phone's language.
+     */
+    val translationTargetLanguage: Preference<String> = preferenceStore.getString("reader_translation_target", "")
+
     val cropBordersWebtoon: Preference<Boolean> = preferenceStore.getBoolean("crop_borders_webtoon", false)
 
     val webtoonSidePadding: Preference<Int> = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)

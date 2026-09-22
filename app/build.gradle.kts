@@ -327,6 +327,9 @@ dependencies {
     // String similarity
     implementation(libs.stringSimilarity)
 
+    // On-device text recognition and translation for translating pages in the reader
+    implementation(libs.bundles.mlkit)
+
     // Tests
     testImplementation(libs.bundles.test)
     testRuntimeOnly(libs.junit.platform.launcher)
