@@ -39,6 +39,8 @@ import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonSubsamplingImageView
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
 import okio.BufferedSource
+import tachiyomi.core.common.util.system.PanelDetector
+import kotlin.math.min
 
 /**
  * A wrapper view for showing page image.
@@ -70,6 +72,21 @@ open class ReaderPageImageView @JvmOverloads constructor(
      */
     var pageBackground: Drawable? = null
 
+    /**
+     * Panels on this page in reading order, for guided view. Empty when guided view is off or the
+     * page has no distinct panels, in which case navigation moves page by page as usual.
+     */
+    var panels: List<PanelDetector.Panel> = emptyList()
+        set(value) {
+            field = value
+            panelIndex = WHOLE_PAGE
+        }
+
+    /**
+     * The panel currently zoomed into, or [WHOLE_PAGE] while the full page is shown.
+     */
+    private var panelIndex = WHOLE_PAGE
+
     @CallSuper
     open fun onImageLoaded() {
         onImageLoaded?.invoke()
@@ -95,13 +112,13 @@ open class ReaderPageImageView @JvmOverloads constructor(
         with(pageView as? SubsamplingScaleImageView) {
             if (this == null) return
             if (isReady) {
-                landscapeZoom(forward)
+                enterPage(forward)
             } else {
                 setOnImageEventListener(
                     object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
                         override fun onReady() {
                             setupZoom(config)
-                            landscapeZoom(forward)
+                            enterPage(forward)
                             this@ReaderPageImageView.onImageLoaded()
                         }
 
@@ -111,6 +128,82 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     },
                 )
             }
+        }
+    }
+
+    /**
+     * Sets up the view for a page that has just come into view. With guided view, arriving from
+     * the previous page shows the whole page first, and arriving from the next page returns to
+     * its last panel, so going back retraces the same steps.
+     */
+    private fun SubsamplingScaleImageView.enterPage(forward: Boolean) {
+        if (panels.isEmpty()) {
+            landscapeZoom(forward)
+            return
+        }
+        if (forward) {
+            panelIndex = WHOLE_PAGE
+            setScaleAndCenter(minScale, PointF(sWidth / 2f, sHeight / 2f))
+        } else {
+            panelIndex = panels.lastIndex
+            showPanel(animate = false)
+        }
+    }
+
+    /**
+     * Zooms into the next panel. Returns false once the last panel has been shown, so the caller
+     * can turn the page instead.
+     */
+    fun nextPanel(): Boolean {
+        val view = readyPanelView() ?: return false
+        if (panelIndex >= panels.lastIndex) return false
+        panelIndex++
+        view.showPanel(animate = true)
+        return true
+    }
+
+    /**
+     * Zooms into the previous panel, or out to the whole page from the first one. Returns false
+     * when already showing the whole page, so the caller can turn the page instead.
+     */
+    fun previousPanel(): Boolean {
+        val view = readyPanelView() ?: return false
+        if (panelIndex == WHOLE_PAGE) return false
+        panelIndex--
+        view.showPanel(animate = true)
+        return true
+    }
+
+    private fun readyPanelView(): SubsamplingScaleImageView? {
+        if (panels.isEmpty()) return null
+        return (pageView as? SubsamplingScaleImageView)?.takeIf { it.isReady }
+    }
+
+    /**
+     * Fits the current panel to the screen, or the whole page for [WHOLE_PAGE].
+     */
+    private fun SubsamplingScaleImageView.showPanel(animate: Boolean) {
+        val (targetScale, targetCenter) = if (panelIndex == WHOLE_PAGE) {
+            minScale to PointF(sWidth / 2f, sHeight / 2f)
+        } else {
+            val panel = panels[panelIndex]
+            val panelWidth = (panel.right - panel.left) * sWidth
+            val panelHeight = (panel.bottom - panel.top) * sHeight
+            val fitScale = min(width / panelWidth, height / panelHeight)
+            fitScale.coerceIn(minScale, maxScale) to PointF(
+                (panel.left + panel.right) / 2f * sWidth,
+                (panel.top + panel.bottom) / 2f * sHeight,
+            )
+        }
+
+        if (animate) {
+            animateScaleAndCenter(targetScale, targetCenter)!!
+                .withDuration(PANEL_ANIMATION_DURATION)
+                .withEasing(EASE_IN_OUT_QUAD)
+                .withInterruptible(true)
+                .start()
+        } else {
+            setScaleAndCenter(targetScale, targetCenter)
         }
     }
 
@@ -276,7 +369,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
                 override fun onReady() {
                     setupZoom(config)
-                    if (isVisibleOnScreen()) landscapeZoom(true)
+                    if (isVisibleOnScreen()) enterPage(true)
                     this@ReaderPageImageView.onImageLoaded()
                 }
 
@@ -421,3 +514,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
 }
 
 private const val MAX_ZOOM_SCALE = 5F
+
+private const val WHOLE_PAGE = -1
+
+private const val PANEL_ANIMATION_DURATION = 350L

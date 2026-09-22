@@ -331,6 +331,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the right.
      */
     protected open fun moveRight() {
+        if (moveThroughPanels(forward = this !is R2LPagerViewer)) return
         if (pager.currentItem != adapter.count - 1) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
@@ -345,6 +346,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the left.
      */
     protected open fun moveLeft() {
+        if (moveThroughPanels(forward = this is R2LPagerViewer)) return
         if (pager.currentItem != 0) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
@@ -353,6 +355,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                 pager.setCurrentItem(pager.currentItem - 1, config.usePageTransitions)
             }
         }
+    }
+
+    /**
+     * With guided view on, steps to the next or previous panel on the current page. Returns false
+     * when there's no panel left in that direction, so the page should turn instead.
+     */
+    private fun moveThroughPanels(forward: Boolean): Boolean {
+        if (!config.panelNavigation) return false
+        val holder = (currentPage as? ReaderPage)?.let(::getPageHolder) ?: return false
+        return if (forward) holder.nextPanel() else holder.previousPanel()
     }
 
     /**

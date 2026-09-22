@@ -111,6 +111,40 @@ object ImageUtil {
     }
 
     /**
+     * Finds the panels on a page, in reading order. Works on a small copy of the image, which is
+     * plenty to find gutters and far cheaper than scanning the full-size page.
+     *
+     * @return panel bounds as fractions of the page size, or an empty list if the page doesn't
+     * split into at least two panels.
+     */
+    fun detectPanels(imageSource: BufferedSource, rightToLeft: Boolean): List<PanelDetector.Panel> {
+        val bounds = extractImageOptions(imageSource)
+        val longestSide = max(bounds.outWidth, bounds.outHeight)
+        if (longestSide <= 0) return emptyList()
+
+        var sampleSize = 1
+        while (longestSide / (sampleSize * 2) >= PANEL_DETECTION_SIZE) sampleSize *= 2
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = BitmapFactory.decodeStream(imageSource.peek().inputStream(), null, options)
+            ?: return emptyList()
+
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        bitmap.recycle()
+
+        val luma = IntArray(pixels.size) {
+            val color = pixels[it]
+            (color.red * 299 + color.green * 587 + color.blue * 114) / 1000
+        }
+        return PanelDetector.detect(luma, width, height, rightToLeft)
+    }
+
+    /**
      * Extract the 'side' part from [BufferedSource] and return it as [BufferedSource].
      */
     fun splitInHalf(imageSource: BufferedSource, side: Side): BufferedSource {
@@ -555,6 +589,10 @@ object ImageUtil {
     }
 
     private val optimalImageHeight = getDisplayMaxHeightInPx * 2
+
+    // Longest side, in pixels, of the copy used to find panels. Gutters stay several pixels wide
+    // at this size, and scanning it takes a few milliseconds.
+    private const val PANEL_DETECTION_SIZE = 600
 }
 
 val getDisplayMaxHeightInPx: Int

@@ -46,6 +46,9 @@ class PagerConfig(
     var landscapeZoom = false
         private set
 
+    var panelNavigation = false
+        private set
+
     init {
         readerPreferences.readerTheme
             .register(
@@ -70,6 +73,9 @@ class PagerConfig(
 
         readerPreferences.landscapeZoom
             .register({ landscapeZoom = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.panelNavigation
+            .register({ panelNavigation = it }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.navigationModePager
             .register({ navigationMode = it }, { updateNavigation(navigationMode) })

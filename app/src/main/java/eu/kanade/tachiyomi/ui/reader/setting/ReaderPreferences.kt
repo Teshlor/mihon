@@ -89,6 +89,12 @@ class ReaderPreferences(
 
     val landscapeZoom: Preference<Boolean> = preferenceStore.getBoolean("landscape_zoom", true)
 
+    /**
+     * Guided view: in paged modes, taps step through a page's panels one at a time before moving
+     * on to the next page.
+     */
+    val panelNavigation: Preference<Boolean> = preferenceStore.getBoolean("pager_panel_navigation", false)
+
     val cropBordersWebtoon: Preference<Boolean> = preferenceStore.getBoolean("crop_borders_webtoon", false)
 
     val webtoonSidePadding: Preference<Int> = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)

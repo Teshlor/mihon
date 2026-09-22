@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.drawable.Drawable
 import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
@@ -26,6 +27,7 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.PanelDetector
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 
@@ -150,7 +152,7 @@ class PagerPageHolder(
         val streamFn = page.stream ?: return
 
         try {
-            val (source, isAnimated, background) = withIOContext {
+            val (source, isAnimated, background, panels) = withIOContext {
                 val source = streamFn().use { process(item, Buffer().readFrom(it)) }
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                 val background = if (!isAnimated && viewer.config.automaticBackground) {
@@ -158,9 +160,11 @@ class PagerPageHolder(
                 } else {
                     null
                 }
-                Triple(source, isAnimated, background)
+                val panels = if (!isAnimated) detectPanels(source) else emptyList()
+                LoadedImage(source, isAnimated, background, panels)
             }
             withUIContext {
+                this@PagerPageHolder.panels = panels
                 setImage(
                     source,
                     isAnimated,
@@ -184,6 +188,27 @@ class PagerPageHolder(
             }
         }
     }
+
+    /**
+     * Finds the panels for guided view. Skipped with crop borders on, because the panel bounds
+     * are measured on the uncropped image and would no longer line up with what's shown.
+     */
+    private fun detectPanels(source: BufferedSource): List<PanelDetector.Panel> {
+        if (!viewer.config.panelNavigation || viewer.config.imageCropBorders) return emptyList()
+        return try {
+            ImageUtil.detectPanels(source, rightToLeft = viewer is R2LPagerViewer)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Failed to detect panels" }
+            emptyList()
+        }
+    }
+
+    private data class LoadedImage(
+        val source: BufferedSource,
+        val isAnimated: Boolean,
+        val background: Drawable?,
+        val panels: List<PanelDetector.Panel>,
+    )
 
     private fun process(page: ReaderPage, imageSource: BufferedSource): BufferedSource {
         if (viewer.config.dualPageRotateToFit) {
