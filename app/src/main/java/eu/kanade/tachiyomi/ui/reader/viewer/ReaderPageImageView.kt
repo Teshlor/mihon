@@ -24,6 +24,7 @@ import coil3.asDrawable
 import coil3.dispose
 import coil3.imageLoader
 import coil3.request.CachePolicy
+import coil3.request.Disposable
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
@@ -67,6 +68,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
     private var overlayView: View? = null
 
     private var config: Config? = null
+
+    /**
+     * The webtoon decode in flight, disposed when the view gets another image or is recycled so a
+     * late result can't replace the newer image or land on a recycled view.
+     */
+    private var imageRequest: Disposable? = null
 
     /**
      * The bitmap the webtoon viewer decoded for this page and handed to the page view, or null
@@ -271,6 +278,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
         decodedBitmap = null
+        disposeImageRequest()
         if (drawable is Animatable) {
             prepareAnimatedImageView()
             setAnimatedImage(drawable, config)
@@ -283,6 +291,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
         decodedBitmap = null
+        disposeImageRequest()
         if (isAnimated) {
             prepareAnimatedImageView()
             setAnimatedImage(source, config)
@@ -294,11 +303,17 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun recycle() = pageView?.let {
         decodedBitmap = null
+        disposeImageRequest()
         when (it) {
             is SubsamplingScaleImageView -> it.recycle()
             is AppCompatImageView -> it.dispose()
         }
         it.isVisible = false
+    }
+
+    private fun disposeImageRequest() {
+        imageRequest?.dispose()
+        imageRequest = null
     }
 
     /**
@@ -478,6 +493,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .crossfade(false)
                     .build()
                     .let(context.imageLoader::enqueue)
+                    .also { imageRequest = it }
             }
             else -> {
                 throw IllegalArgumentException("Not implemented for class ${data::class.simpleName}")
