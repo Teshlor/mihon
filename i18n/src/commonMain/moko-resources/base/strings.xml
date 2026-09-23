@@ -489,6 +489,7 @@
     <string name="translation_tap_to_hide">Tap anywhere to hide translation</string>
     <string name="translation_no_text">No text found on this page</string>
     <string name="translation_failed">Couldn\'t translate this page</string>
+    <string name="translation_failed_reason">Couldn\'t translate this page: %1$s</string>
     <string name="pref_panel_navigation_summary">Taps zoom through each panel in turn before turning the page. Not available with crop borders</string>
     <string name="pref_zoom_start">Zoom start position</string>
     <string name="zoom_start_automatic">Automatic</string>

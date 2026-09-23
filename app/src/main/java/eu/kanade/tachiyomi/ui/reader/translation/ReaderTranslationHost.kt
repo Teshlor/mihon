@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
+import android.widget.Toast
 import androidx.core.graphics.createBitmap
 import androidx.lifecycle.lifecycleScope
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import logcat.LogPriority
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import kotlin.coroutines.resume
@@ -57,7 +59,7 @@ class ReaderTranslationHost(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    private val translator = PageTranslator()
+    private val translator = PageTranslator(activity.applicationContext)
     private var job: Job? = null
 
     /**
@@ -99,7 +101,12 @@ class ReaderTranslationHost(
                 throw e
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "Failed to translate page" }
-                activity.toast(MR.strings.translation_failed)
+                // Include the reason, so a failure can be told apart from the others and fixed.
+                val reason = e.message?.takeIf { it.isNotBlank() } ?: e::class.simpleName
+                activity.toast(
+                    activity.stringResource(MR.strings.translation_failed_reason, reason.orEmpty()),
+                    Toast.LENGTH_LONG,
+                )
                 _state.value = State.Idle
             }
         }

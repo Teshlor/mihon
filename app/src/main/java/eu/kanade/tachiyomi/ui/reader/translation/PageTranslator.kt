@@ -1,7 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.translation
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
+import com.google.android.gms.common.moduleinstall.InstallStatusListener
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
+import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.translate.TranslateLanguage
@@ -16,18 +21,22 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import java.io.Closeable
 import java.util.Locale
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Reads the text in a picture of a page and translates it, entirely on the device. Text is found
- * with ML Kit's text recognition and translated with ML Kit's offline translator, which downloads
- * a language model (around 30 MB) the first time each language is used.
+ * with ML Kit's text recognition, whose models Google Play services downloads on first use, and
+ * translated with ML Kit's offline translator, which downloads a language model (around 30 MB)
+ * the first time each language is used.
  *
  * Recognizers and translators are kept between pages and released by [close].
  */
-class PageTranslator : Closeable {
+class PageTranslator(private val context: Context) : Closeable {
 
     /**
      * One run of text, usually a speech bubble or caption, with its position in the picture.
@@ -42,8 +51,8 @@ class PageTranslator : Closeable {
      *
      * @param sourceTag the language the page is written in, one of [SOURCE_LANGUAGES].
      * @param targetTag the language to translate into, one of [targetLanguages].
-     * @param onDownloadingModel called before a language model has to be downloaded, which can
-     * take a while.
+     * @param onDownloadingModel called before a text recognition or language model has to be
+     * downloaded, which can take a while.
      */
     suspend fun translate(
         image: Bitmap,
@@ -52,6 +61,7 @@ class PageTranslator : Closeable {
         onDownloadingModel: () -> Unit,
     ): List<Block> {
         val recognizer = recognizers.getOrPut(sourceTag) { createRecognizer(sourceTag) }
+        ensureInstalled(recognizer, onDownloadingModel)
         val text = recognizer.process(InputImage.fromBitmap(image, 0)).await()
 
         val separator = if (sourceTag in CJK_LANGUAGES) "" else " "
@@ -81,6 +91,51 @@ class PageTranslator : Closeable {
 
         return found.map { (bounds, original) ->
             Block(bounds, original, translator.translate(original).await())
+        }
+    }
+
+    /**
+     * Makes sure Play services has the recognizer's model. Without this, recognition fails until
+     * Play services gets round to downloading the model by itself, which may be never.
+     */
+    private suspend fun ensureInstalled(recognizer: TextRecognizer, onDownloading: () -> Unit) {
+        val client = ModuleInstall.getClient(context)
+        if (client.areModulesAvailable(recognizer).await().areModulesAvailable()) return
+
+        onDownloading()
+        suspendCancellableCoroutine { continuation ->
+            val listener = object : InstallStatusListener {
+                override fun onInstallStatusUpdated(update: ModuleInstallStatusUpdate) {
+                    val error = when (update.installState) {
+                        ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED -> null
+                        ModuleInstallStatusUpdate.InstallState.STATE_FAILED,
+                        ModuleInstallStatusUpdate.InstallState.STATE_CANCELED,
+                        -> IllegalStateException(
+                            "Text recognition download failed (Play services error ${update.errorCode})",
+                        )
+                        else -> return // Still in progress
+                    }
+                    client.unregisterListener(this)
+                    if (error == null) continuation.resume(Unit) else continuation.resumeWithException(error)
+                }
+            }
+            continuation.invokeOnCancellation { client.unregisterListener(listener) }
+
+            val request = ModuleInstallRequest.newBuilder()
+                .addApi(recognizer)
+                .setListener(listener)
+                .build()
+            client.installModules(request)
+                .addOnSuccessListener {
+                    if (it.areModulesAlreadyInstalled()) {
+                        client.unregisterListener(listener)
+                        continuation.resume(Unit)
+                    }
+                }
+                .addOnFailureListener {
+                    client.unregisterListener(listener)
+                    continuation.resumeWithException(it)
+                }
         }
     }
 
