@@ -13,7 +13,12 @@ import androidx.recyclerview.widget.RecyclerView.NO_POSITION
  * This layout manager uses the same package name as the support library in order to use a package
  * protected method.
  */
-class WebtoonLayoutManager(context: Context, private val extraLayoutSpace: Int) : LinearLayoutManager(context) {
+class WebtoonLayoutManager(context: Context, extraLayoutSpace: Int) : LinearLayoutManager(context) {
+
+    /**
+     * Pixels laid out beyond the screen in the scroll direction, read on every layout and scroll.
+     */
+    var extraLayoutSpace: Int = extraLayoutSpace
 
     init {
         isItemPrefetchEnabled = false

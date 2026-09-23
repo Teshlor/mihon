@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
+import android.app.ActivityManager
+import android.content.res.Resources
 import android.graphics.PointF
 import android.os.SystemClock
 import android.view.Choreographer
@@ -10,6 +12,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import androidx.core.content.getSystemService
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -23,6 +26,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.translation.PageTranslation
 import eu.kanade.tachiyomi.ui.reader.translation.PageTranslationScheduler
 import eu.kanade.tachiyomi.ui.reader.translation.TranslationKey
+import eu.kanade.tachiyomi.ui.reader.translation.engine.LookaheadBudget
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import eu.kanade.tachiyomi.util.system.toast
@@ -120,6 +124,11 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * Created the first time translation is turned on, so readers who never use it pay nothing.
      */
     private var translationScheduler: PageTranslationScheduler? = null
+
+    /**
+     * Width of the widest page bitmap translation has been asked for, which sizes the look-ahead.
+     */
+    private var widestTranslatedBitmap = 0
 
     private var scrollLoopRunning = false
     private var scrollLoopLastFrameNanos = 0L
@@ -371,13 +380,49 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
             forEachPageHolder { it.stopTranslation() }
             translationScheduler?.cancelAll()
         }
+        if (updateTranslationLookahead()) recycler.requestLayout()
     }
 
     /**
      * Asks for [page] to be translated, see [PageTranslationScheduler.request].
      */
-    fun requestTranslation(page: ReaderPage, target: PageTranslationScheduler.Target): PageTranslationScheduler.Handle =
-        translationScheduler().request(translationKey(page), target)
+    fun requestTranslation(page: ReaderPage, target: PageTranslationScheduler.Target): PageTranslationScheduler.Handle {
+        val bitmapWidth = target.bitmap?.width ?: 0
+        if (bitmapWidth > widestTranslatedBitmap) {
+            widestTranslatedBitmap = bitmapWidth
+            // This can run during a layout, so the new space applies from the next one.
+            updateTranslationLookahead()
+        }
+        return translationScheduler().request(translationKey(page), target)
+    }
+
+    /**
+     * Lays out pages further below the screen while translating, so they are decoded and
+     * translated before the reader gets there, as far as [LookaheadBudget] allows. Without
+     * translation, or on a low-RAM phone, it is the usual [scrollDistance].
+     *
+     * Returns whether the space changed; it applies from the next layout or scroll.
+     */
+    private fun updateTranslationLookahead(): Boolean {
+        val activityManager = activity.getSystemService<ActivityManager>()
+        val extra = if (!translationEnabled || activityManager == null || activityManager.isLowRamDevice) {
+            scrollDistance
+        } else {
+            // The page view's width, as WebtoonPageHolder lays it out.
+            val listWidth = recycler.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
+            val sideMargin = (Resources.getSystem().displayMetrics.widthPixels * (config.sidePadding / 100f)).toInt()
+            LookaheadBudget.extraSpacePx(
+                basePx = scrollDistance,
+                viewportHeightPx = recycler.height.takeIf { it > 0 } ?: screenHeight,
+                viewWidthPx = (listWidth - 2 * sideMargin).coerceAtLeast(0),
+                bitmapWidthPx = widestTranslatedBitmap,
+                memoryClassMb = activityManager.memoryClass,
+            )
+        }
+        if (extra == layoutManager.extraLayoutSpace) return false
+        layoutManager.extraLayoutSpace = extra
+        return true
+    }
 
     private fun translationScheduler(): PageTranslationScheduler =
         translationScheduler ?: PageTranslationScheduler(
