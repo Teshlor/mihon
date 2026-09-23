@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.recyclerview.widget.RecyclerView
 import eu.kanade.tachiyomi.ui.reader.translation.engine.BandPriority
+import eu.kanade.tachiyomi.ui.reader.translation.engine.BlankBand
 import eu.kanade.tachiyomi.ui.reader.translation.engine.Box
 import eu.kanade.tachiyomi.ui.reader.translation.engine.LineGrouper
 import eu.kanade.tachiyomi.ui.reader.translation.engine.PatchColour
@@ -375,8 +376,17 @@ class PageTranslationScheduler(
         try {
             val source = job.key.sourceLang
             var ocrMillis = 0L
+            var blank = false
             val outcome = attempt {
-                val lines = withContext(Dispatchers.Default) { translator.recognize(copy, source) }
+                val (isBlank, lines) = withContext(Dispatchers.Default) {
+                    val isBlank = BlankBand.isBlank(copy.width, copy.height) { y, row ->
+                        copy.getPixels(row, 0, copy.width, 0, y, copy.width, 1)
+                    }
+                    // A band with nothing to read still goes through settle, which releases the
+                    // lines its neighbours held for it.
+                    isBlank to if (isBlank) emptyList() else translator.recognize(copy, source)
+                }
+                blank = isBlank
                 if (TranslatePerf.ENABLED) ocrMillis = TranslatePerf.now() - ocrStart
                 val found = lines.map { it.copy(box = it.box.offset(0f, band.top.toFloat())) }
                 // Back on the main thread, which is the only one that touches the job's bands and
@@ -407,13 +417,13 @@ class PageTranslationScheduler(
                 val now = TranslatePerf.now()
                 TranslatePerf.log(
                     "band p=${job.key.pageIndex} b=$bandIndex/${job.bands.size} order=${job.done.size} prio=$prio" +
-                        " sinceReq=${now - job.createdAt} copy=${ocrStart - copyStart} blank=0 ocr=$ocrMillis" +
-                        " lines=$lineCount held=${advance.carried.size}",
+                        " sinceReq=${now - job.createdAt} copy=${ocrStart - copyStart}" +
+                        " blank=${if (blank) 1 else 0} ocr=$ocrMillis lines=$lineCount held=${advance.carried.size}",
                 )
                 perf?.band(
                     (ocrStart - copyStart).toInt(),
                     ocrMillis.toInt(),
-                    blank = false,
+                    blank = blank,
                     busyMillis = now - ocrStart,
                 )
             }
