@@ -92,6 +92,7 @@ class PageTranslationScheduler(
     private val translator = PageTranslation.create(context.applicationContext)
     private val layouts = BubbleLayouts(context)
     private val cache = TranslationCache()
+    private val textCache = TranslatedTextCache()
     private val fitted = object : LinkedHashMap<Pair<TranslationKey, Int>, List<OverlayBlock>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<TranslationKey, Int>, List<OverlayBlock>>) =
             size > TranslationCache.DEFAULT_MAX_PAGES
@@ -128,6 +129,9 @@ class PageTranslationScheduler(
         var inFlight = 0
         var abandoned = false
         val isRecognized: Boolean get() = done.size == bands.size
+
+        /** Bands whose reading failed once and were given another go. */
+        val retried = mutableSetOf<Int>()
 
         /** When the job was created, for [TranslatePerf]. */
         val createdAt = TranslatePerf.now()
@@ -256,6 +260,7 @@ class PageTranslationScheduler(
         // Any recognition or translation still running in ML Kit fails harmlessly once closed.
         translator.close()
         cache.clear()
+        textCache.clear()
         fitted.clear()
     }
 
@@ -409,6 +414,12 @@ class PageTranslationScheduler(
             if (outcome.isSuccess) copy.recycle()
             val (advance, drafts, lineCount) = outcome.getOrElse { e ->
                 logcat(LogPriority.ERROR, e) { "Couldn't read page ${job.key.pageIndex} band $bandIndex" }
+                if (job.retried.add(bandIndex)) {
+                    // Give the band one more go before giving up on the page. Returning it to the
+                    // pool is all it takes: it isn't done, and finally stops reading it.
+                    if (TranslatePerf.ENABLED) logFailure(job, bandIndex, e, retry = true)
+                    return
+                }
                 if (TranslatePerf.ENABLED) logFailure(job, bandIndex, e, retry = false)
                 fail(job, e)
                 return
@@ -544,14 +555,23 @@ class PageTranslationScheduler(
     private suspend fun translateBand(result: BandResult) {
         val job = result.job
         val start = if (TranslatePerf.ENABLED) TranslatePerf.now() else 0L
+        val sourceLang = job.key.sourceLang
+        val targetLang = job.key.targetLang
         val texts = result.drafts.map { it.original }
-        val translated = if (texts.isEmpty()) {
+        // Only texts not translated before, each once.
+        val known = texts.map { textCache[sourceLang, targetLang, it] }
+        val hits = known.count { it != null }
+        val missing = texts.filterIndexed { i, _ -> known[i] == null }.distinct()
+        val fresh = if (missing.isEmpty()) {
             emptyList()
         } else {
             withContext(Dispatchers.Default) {
-                translator.translateText(texts, job.key.sourceLang, job.key.targetLang)
+                translator.translateText(missing, sourceLang, targetLang)
             }
         }
+        missing.zip(fresh) { text, english -> textCache[sourceLang, targetLang, text] = english }
+        val byText = missing.zip(fresh).toMap()
+        val translated = texts.mapIndexed { i, text -> known[i] ?: byText[text].orEmpty() }
         val translateMillis = if (TranslatePerf.ENABLED) TranslatePerf.now() - start else 0L
         if (job.abandoned) return
 
@@ -586,12 +606,12 @@ class PageTranslationScheduler(
             val queued = start - result.queuedAt
             TranslatePerf.log(
                 "pub p=${job.key.pageIndex} b=${result.bandIndex}/${job.bands.size} tq=$queued tr=$translateMillis" +
-                    " strs=${texts.size} hits=0 new=${bubbles.size}" +
+                    " strs=${missing.size} hits=$hits new=${bubbles.size}" +
                     " ahead=${counts[PerfStats.Bucket.AHEAD.ordinal]} lower=${counts[PerfStats.Bucket.LOWER.ordinal]}" +
                     " past=${counts[PerfStats.Bucket.PAST_MID.ordinal]} gone=${counts[PerfStats.Bucket.GONE.ordinal]}" +
                     " sinceReq=${TranslatePerf.now() - job.createdAt}",
             )
-            perf?.published(queued.toInt(), translateMillis.toInt(), texts.size, 0, counts)
+            perf?.published(queued.toInt(), translateMillis.toInt(), missing.size, hits, counts)
         }
     }
 
