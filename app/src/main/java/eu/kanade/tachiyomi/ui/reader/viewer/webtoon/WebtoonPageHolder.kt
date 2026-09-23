@@ -118,6 +118,7 @@ class WebtoonPageHolder(
         refreshLayoutParams()
 
         frame.onImageLoaded = { onImageDecoded() }
+        frame.onDecodedBitmap = { if (viewer.translationEnabled) startTranslation() }
         frame.onImageLoadError = { error -> setError(error) }
         frame.onScaleChanged = { viewer.activity.hideMenu() }
     }
@@ -313,6 +314,9 @@ class WebtoonPageHolder(
     /**
      * Starts translating this page, if its image is decoded. Animated pages are skipped: they have
      * no single bitmap to read.
+     *
+     * Called when the image is ready and again when its bitmap becomes available, so whichever of
+     * the two comes last starts it.
      */
     fun startTranslation() {
         if (translationHandle != null) return

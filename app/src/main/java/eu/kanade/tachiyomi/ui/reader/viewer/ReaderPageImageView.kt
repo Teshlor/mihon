@@ -74,9 +74,21 @@ open class ReaderPageImageView @JvmOverloads constructor(
      *
      * The page view recycles this bitmap when it is recycled or given a new image, on the main
      * thread. Only read its pixels on the main thread, after checking [Bitmap.isRecycled].
+     *
+     * It is set before the bitmap goes to the page view, so it is already there when
+     * [onImageLoaded] fires, which the page view can do from inside its own setImage.
      */
     var decodedBitmap: Bitmap? = null
-        private set
+        private set(value) {
+            field = value
+            if (value != null) onDecodedBitmap?.invoke()
+        }
+
+    /**
+     * Called each time [decodedBitmap] becomes available, so a reader of it that was ready first
+     * never misses it.
+     */
+    var onDecodedBitmap: (() -> Unit)? = null
 
     /**
      * Width and height of the image the page view shows, 0 until it is ready.
@@ -448,8 +460,9 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .target(
                         onSuccess = { result ->
                             val image = result as BitmapImage
-                            setImage(ImageSource.bitmap(image.bitmap))
+                            // Before setImage: its ready callback can run inside it, and reads this.
                             decodedBitmap = image.bitmap
+                            setImage(ImageSource.bitmap(image.bitmap))
                             isVisible = true
                         },
                     )
