@@ -124,6 +124,10 @@ class WebtoonAdapter(val viewer: WebtoonViewer) : RecyclerView.Adapter<RecyclerV
         }
     }
 
+    override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
+        (holder as? WebtoonPageHolder)?.onAttached()
+    }
+
     /**
      * Recycles an existing view [holder] before adding it to the view pool.
      */

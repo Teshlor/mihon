@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.content.res.Resources
+import android.graphics.Bitmap
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -14,6 +15,8 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.translation.OverlayBlock
+import eu.kanade.tachiyomi.ui.reader.translation.PageTranslationScheduler
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -80,6 +83,37 @@ class WebtoonPageHolder(
      */
     private var loadJob: Job? = null
 
+    /**
+     * Draws this page's translation, created the first time translation is on for this holder.
+     */
+    private var translationOverlay: TranslationOverlayView? = null
+
+    /**
+     * This page's translation request, while translation is on and the image is decoded.
+     */
+    private var translationHandle: PageTranslationScheduler.Handle? = null
+
+    /**
+     * The page whose image the page view has decoded, so a rebind can't translate the previous
+     * page's bitmap under the new page's name.
+     */
+    private var decodedPage: ReaderPage? = null
+
+    private val translationTarget = object : PageTranslationScheduler.Target {
+        override val position: Int
+            get() = bindingAdapterPosition
+
+        override val bitmap: Bitmap?
+            get() = frame.decodedBitmap
+
+        override val viewWidth: Int
+            get() = frame.width
+
+        override fun show(blocks: List<OverlayBlock>, fadeInFrom: Int) {
+            translationOverlay?.show(blocks, fadeInFrom)
+        }
+    }
+
     init {
         refreshLayoutParams()
 
@@ -92,6 +126,8 @@ class WebtoonPageHolder(
      * Binds the given [page] with this view holder, subscribing to its state.
      */
     fun bind(page: ReaderPage) {
+        stopTranslation()
+        decodedPage = null
         this.page = page
         loadJob?.cancel()
         loadJob = scope.launch { loadPageAndProcessStatus() }
@@ -118,6 +154,9 @@ class WebtoonPageHolder(
         loadJob = null
 
         removeErrorLayout()
+        // Before the page view recycles the bitmap the translation reads from.
+        stopTranslation()
+        decodedPage = null
         frame.recycle()
         progressIndicator.setProgress(0)
         progressContainer.isVisible = true
@@ -196,6 +235,9 @@ class WebtoonPageHolder(
                 Pair(source, isAnimated)
             }
             withUIContext {
+                // Setting a new image recycles the old bitmap, which translation may be reading.
+                stopTranslation()
+                decodedPage = null
                 frame.setImage(
                     source,
                     isAnimated,
@@ -255,7 +297,40 @@ class WebtoonPageHolder(
     private fun onImageDecoded() {
         progressContainer.isVisible = false
         removeErrorLayout()
+        decodedPage = page
         page?.let { viewer.onPageImageDecoded(it) }
+        if (viewer.translationEnabled) startTranslation()
+    }
+
+    /**
+     * Called when this holder's view is attached to the recycler, including when it comes back
+     * from the view cache without being bound again. Brings translation in line with the mode.
+     */
+    fun onAttached() {
+        if (viewer.translationEnabled) startTranslation() else stopTranslation()
+    }
+
+    /**
+     * Starts translating this page, if its image is decoded. Animated pages are skipped: they have
+     * no single bitmap to read.
+     */
+    fun startTranslation() {
+        if (translationHandle != null) return
+        val page = page ?: return
+        if (decodedPage !== page || frame.decodedBitmap == null) return
+        if (translationOverlay == null) {
+            translationOverlay = TranslationOverlayView(context, frame).also(frame::addOverlay)
+        }
+        translationHandle = viewer.requestTranslation(page, translationTarget)
+    }
+
+    /**
+     * Stops translating this page and hides its translation.
+     */
+    fun stopTranslation() {
+        translationHandle?.cancel()
+        translationHandle = null
+        translationOverlay?.clear()
     }
 
     /**

@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
@@ -19,12 +20,18 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
+import eu.kanade.tachiyomi.ui.reader.translation.PageTranslation
+import eu.kanade.tachiyomi.ui.reader.translation.PageTranslationScheduler
+import eu.kanade.tachiyomi.ui.reader.translation.TranslationKey
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import mihon.app.di.appGraph
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.i18n.MR
 import kotlin.math.max
 import kotlin.math.min
 
@@ -101,6 +108,18 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * temporarily overrides it, so releasing the key resumes at full speed.
      */
     private var autoScrollStartMillis = 0L
+
+    /**
+     * Whether pages are translated as they scroll into view. Session only; turned on and off
+     * from the reader's top bar.
+     */
+    var translationEnabled = false
+        private set
+
+    /**
+     * Created the first time translation is turned on, so readers who never use it pay nothing.
+     */
+    private var translationScheduler: PageTranslationScheduler? = null
 
     private var scrollLoopRunning = false
     private var scrollLoopLastFrameNanos = 0L
@@ -201,6 +220,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
             object : RecyclerView.OnScrollListener() {
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                     onScrolled()
+                    if (translationEnabled) updateTranslationFocus()
 
                     if ((dy > threshold || dy < -threshold) && activity.viewModel.state.value.menuVisible) {
                         activity.hideMenu()
@@ -333,7 +353,81 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         autoScrollActive = false
         holdScrollDirection = 0
         stopScrollLoop()
+        translationScheduler?.destroy()
+        translationScheduler = null
         scope.cancel()
+    }
+
+    /**
+     * Turns translate-as-you-scroll on or off for the pages in this viewer.
+     */
+    fun setTranslationEnabled(enabled: Boolean) {
+        if (enabled && !PageTranslation.isAvailable) return
+        if (translationEnabled == enabled) return
+        translationEnabled = enabled
+        if (enabled) {
+            translationScheduler().resetNotices()
+            forEachPageHolder { it.startTranslation() }
+            updateTranslationFocus()
+        } else {
+            forEachPageHolder { it.stopTranslation() }
+            translationScheduler?.cancelAll()
+        }
+    }
+
+    /**
+     * Asks for [page] to be translated, see [PageTranslationScheduler.request].
+     */
+    fun requestTranslation(page: ReaderPage, target: PageTranslationScheduler.Target): PageTranslationScheduler.Handle =
+        translationScheduler().request(translationKey(page), target)
+
+    private fun translationScheduler(): PageTranslationScheduler =
+        translationScheduler ?: PageTranslationScheduler(
+            activity,
+            object : PageTranslationScheduler.Listener {
+                override fun onNeedsWifi() {
+                    activity.toast(MR.strings.translation_needs_wifi, Toast.LENGTH_LONG)
+                }
+
+                override fun onFailed(reason: String) {
+                    activity.toast(
+                        activity.stringResource(MR.strings.translation_failed_reason, reason),
+                        Toast.LENGTH_LONG,
+                    )
+                }
+            },
+        ).also { translationScheduler = it }
+
+    private fun translationKey(page: ReaderPage): TranslationKey = TranslationKey(
+        chapterId = page.chapter.chapter.id ?: -1L,
+        pageIndex = page.index,
+        image = page.imageUrl ?: page.url,
+        sourceLang = readerPreferences.translationSourceLanguage.get(),
+        targetLang = readerPreferences.translationTargetLanguage.get().ifEmpty {
+            PageTranslation.defaultTargetLanguage
+        },
+        pipelineVersion = PageTranslationScheduler.PIPELINE_VERSION,
+        cropBorders = config.imageCropBorders,
+        dualSplit = config.dualPageSplit,
+        dualSplitInvert = config.dualPageInvert,
+        rotateToFit = config.dualPageRotateToFit,
+        rotateToFitInvert = config.dualPageRotateToFitInvert,
+    )
+
+    /**
+     * Tells the translator which page is in the middle of the screen, so it goes first.
+     */
+    private fun updateTranslationFocus() {
+        val scheduler = translationScheduler ?: return
+        val child = recycler.findChildViewUnder(recycler.width / 2f, recycler.height / 2f) ?: return
+        val position = recycler.getChildAdapterPosition(child)
+        if (position != RecyclerView.NO_POSITION) scheduler.setFocus(position)
+    }
+
+    private inline fun forEachPageHolder(action: (WebtoonPageHolder) -> Unit) {
+        for (i in 0..<recycler.childCount) {
+            (recycler.getChildViewHolder(recycler.getChildAt(i)) as? WebtoonPageHolder)?.let(action)
+        }
     }
 
     /**
