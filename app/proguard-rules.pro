@@ -91,6 +91,13 @@
 -keep class com.google.firebase.installations.** { *; }
 -keep interface com.google.firebase.installations.** { *; }
 
+# ML Kit and Firebase discover components by instantiating ComponentRegistrar implementations
+# reflectively from manifest metadata. firebase-components 16.1.0's consumer rule keeps only the
+# classes, and R8 full mode no longer keeps default constructors implicitly, so without this ML Kit
+# fails at startup and page translation crashes. Matches nothing in builds without ML Kit or
+# Firebase (e.g. foss).
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
+
 # KotlinX Datetime
 -keep,allowoptimization class kotlinx.datetime.** { public protected *; }
 
