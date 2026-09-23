@@ -20,6 +20,7 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import eu.kanade.tachiyomi.ui.reader.translation.engine.Box
 import eu.kanade.tachiyomi.util.system.isConnectedToWifi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
@@ -36,6 +37,8 @@ import kotlin.coroutines.resumeWithException
  */
 internal class MlKitPageTranslator(private val context: Context) : PageTranslator {
 
+    // Guards the two maps: the scroll translator calls in from background threads.
+    private val lock = Any()
     private val recognizers = mutableMapOf<String, TextRecognizer>()
     private val translators = mutableMapOf<Pair<String, String>, Translator>()
 
@@ -45,21 +48,27 @@ internal class MlKitPageTranslator(private val context: Context) : PageTranslato
         targetTag: String,
         onDownloadingModel: () -> Unit,
     ): List<PageTranslator.Block> {
-        val recognizer = recognizers.getOrPut(sourceTag) { createRecognizer(sourceTag) }
+        ensureModels(sourceTag, targetTag, onDownloadingModel)
 
-        val source = TranslateLanguage.fromLanguageTag(sourceTag)
-        val target = TranslateLanguage.fromLanguageTag(targetTag)
-        val languages = if (source == null || target == null || source == target) null else source to target
-        val translator = languages?.let {
-            translators.getOrPut(it) {
-                Translation.getClient(
-                    TranslatorOptions.Builder()
-                        .setSourceLanguage(it.first)
-                        .setTargetLanguage(it.second)
-                        .build(),
-                )
-            }
+        val text = recognizerFor(sourceTag).process(InputImage.fromBitmap(image, 0)).await()
+
+        val separator = if (sourceTag in CJK_LANGUAGES) "" else " "
+        val found = text.textBlocks.mapNotNull { block ->
+            val bounds = block.boundingBox ?: return@mapNotNull null
+            val original = block.lines.joinToString(separator) { it.text.trim() }.trim()
+            if (original.isBlank()) null else bounds to original
         }
+        if (found.isEmpty()) return emptyList()
+
+        val translated = translateText(found.map { it.second }, sourceTag, targetTag)
+        return found.zip(translated) { (bounds, original), english ->
+            PageTranslator.Block(bounds, original, english)
+        }
+    }
+
+    override suspend fun ensureModels(sourceTag: String, targetTag: String, onDownloadingModel: () -> Unit) {
+        val recognizer = recognizerFor(sourceTag)
+        val languages = languagePair(sourceTag, targetTag)
 
         // Check everything that has to be downloaded up front, so the phone is never made to
         // download a model over mobile data.
@@ -71,24 +80,64 @@ internal class MlKitPageTranslator(private val context: Context) : PageTranslato
         }
 
         ensureInstalled(recognizer)
-        val text = recognizer.process(InputImage.fromBitmap(image, 0)).await()
-
-        val separator = if (sourceTag in CJK_LANGUAGES) "" else " "
-        val found = text.textBlocks.mapNotNull { block ->
-            val bounds = block.boundingBox ?: return@mapNotNull null
-            val original = block.lines.joinToString(separator) { it.text.trim() }.trim()
-            if (original.isBlank()) null else bounds to original
+        if (languages != null) {
+            translatorFor(languages)
+                .downloadModelIfNeeded(DownloadConditions.Builder().requireWifi().build())
+                .await()
         }
-        if (found.isEmpty()) return emptyList()
+    }
 
-        if (translator == null) {
-            return found.map { (bounds, original) -> PageTranslator.Block(bounds, original, original) }
+    override suspend fun recognize(image: Bitmap, sourceTag: String): List<RecognizedLine> {
+        val text = recognizerFor(sourceTag).process(InputImage.fromBitmap(image, 0)).await()
+        return text.textBlocks.flatMap { block ->
+            block.lines.mapNotNull { line ->
+                val bounds = line.boundingBox ?: return@mapNotNull null
+                val content = line.text.trim()
+                if (content.isEmpty()) return@mapNotNull null
+                RecognizedLine(
+                    text = content,
+                    box = Box(
+                        bounds.left.toFloat(),
+                        bounds.top.toFloat(),
+                        bounds.right.toFloat(),
+                        bounds.bottom.toFloat(),
+                    ),
+                    confidence = line.confidence,
+                    language = line.recognizedLanguage.takeUnless { it.isEmpty() || it == "und" },
+                    angle = line.angle,
+                )
+            }
         }
+    }
 
-        translator.downloadModelIfNeeded(DownloadConditions.Builder().requireWifi().build()).await()
+    override suspend fun translateText(texts: List<String>, sourceTag: String, targetTag: String): List<String> {
+        val languages = languagePair(sourceTag, targetTag) ?: return texts
+        val translator = translatorFor(languages)
+        return texts.map { if (it.isBlank()) it else translator.translate(it).await() }
+    }
 
-        return found.map { (bounds, original) ->
-            PageTranslator.Block(bounds, original, translator.translate(original).await())
+    /**
+     * ML Kit's codes for the two languages, or null when there's nothing to translate: the same
+     * language, or one ML Kit can't translate.
+     */
+    private fun languagePair(sourceTag: String, targetTag: String): Pair<String, String>? {
+        val source = TranslateLanguage.fromLanguageTag(sourceTag)
+        val target = TranslateLanguage.fromLanguageTag(targetTag)
+        return if (source == null || target == null || source == target) null else source to target
+    }
+
+    private fun recognizerFor(sourceTag: String): TextRecognizer = synchronized(lock) {
+        recognizers.getOrPut(sourceTag) { createRecognizer(sourceTag) }
+    }
+
+    private fun translatorFor(languages: Pair<String, String>): Translator = synchronized(lock) {
+        translators.getOrPut(languages) {
+            Translation.getClient(
+                TranslatorOptions.Builder()
+                    .setSourceLanguage(languages.first)
+                    .setTargetLanguage(languages.second)
+                    .build(),
+            )
         }
     }
 
@@ -158,7 +207,7 @@ internal class MlKitPageTranslator(private val context: Context) : PageTranslato
         return TextRecognition.getClient(options)
     }
 
-    override fun close() {
+    override fun close() = synchronized(lock) {
         recognizers.values.forEach { it.close() }
         recognizers.clear()
         translators.values.forEach { it.close() }

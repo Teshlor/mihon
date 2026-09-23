@@ -28,7 +28,17 @@ private object NoopPageTranslator : PageTranslator {
         sourceTag: String,
         targetTag: String,
         onDownloadingModel: () -> Unit,
-    ): List<PageTranslator.Block> =
+    ): List<PageTranslator.Block> = unsupported()
+
+    override suspend fun ensureModels(sourceTag: String, targetTag: String, onDownloadingModel: () -> Unit) =
+        unsupported()
+
+    override suspend fun recognize(image: Bitmap, sourceTag: String): List<RecognizedLine> = unsupported()
+
+    override suspend fun translateText(texts: List<String>, sourceTag: String, targetTag: String): List<String> =
+        unsupported()
+
+    private fun unsupported(): Nothing =
         throw UnsupportedOperationException("Page translation is not included in this build")
 
     override fun close() = Unit

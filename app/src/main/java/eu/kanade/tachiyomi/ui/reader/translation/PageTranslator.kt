@@ -35,6 +35,30 @@ interface PageTranslator : Closeable {
         targetTag: String,
         onDownloadingModel: () -> Unit,
     ): List<Block>
+
+    /**
+     * Makes sure the text recognition model for [sourceTag] and the translation models from
+     * [sourceTag] to [targetTag] are on the phone, downloading any that are missing. Call it once
+     * per language pair before [recognize] and [translateText].
+     *
+     * @param onDownloadingModel called before a model has to be downloaded, which can take a while.
+     * @throws TranslationNeedsWifiException if a model has to be downloaded and the phone is not
+     * on Wi-Fi.
+     */
+    suspend fun ensureModels(sourceTag: String, targetTag: String, onDownloadingModel: () -> Unit)
+
+    /**
+     * Finds the lines of text in [image], with their boxes in [image]'s pixels. The models must
+     * already be there, see [ensureModels].
+     */
+    suspend fun recognize(image: Bitmap, sourceTag: String): List<RecognizedLine>
+
+    /**
+     * Translates each of [texts], returning one result per text in the same order. Texts are
+     * returned unchanged when the two languages are the same or can't be translated between. The
+     * models must already be there, see [ensureModels].
+     */
+    suspend fun translateText(texts: List<String>, sourceTag: String, targetTag: String): List<String>
 }
 
 /**
