@@ -66,14 +66,20 @@ android {
     } else if (keystorePropertiesFile.exists()) {
         val keystoreProperties = FileInputStream(keystorePropertiesFile).use { Properties().apply { load(it) } }
 
+        // Personal key for nightly only. The debug key is left alone so debug builds keep updating in place.
         signingConfigs {
-            named("debug") {
+            create("personal") {
                 storeFile = file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
             }
         }
+    } else if (gradle.startParameter.taskNames.any { it.contains("nightly", ignoreCase = true) }) {
+        logger.warn(
+            "keystore.properties not found: nightly will be signed with the debug key " +
+                "and will not install over a build signed with the personal key.",
+        )
     }
 
     buildTypes {
@@ -106,8 +112,9 @@ android {
         }
         create("nightly") {
             initWith(release)
+            signingConfigs.findByName("personal")?.let { signingConfig = it }
 
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = ".teshlor"
 
             versionNameSuffix = debug.versionNameSuffix
 
