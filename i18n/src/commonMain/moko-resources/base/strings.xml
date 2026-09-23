@@ -484,6 +484,7 @@
     <string name="pref_translation_target_default">Phone language</string>
     <string name="pref_translation_summary">Pages are read and translated on your device with Google ML Kit. Language models (about 30 MB each) are downloaded from Google over Wi‑Fi only. Requires Google Play services. Google receives ML Kit usage statistics that can\'t be turned off</string>
     <string name="action_translate_page">Translate page</string>
+    <string name="action_translate_pages">Translate pages</string>
     <string name="translation_in_progress">Translating…</string>
     <string name="translation_downloading_model">Downloading language model…</string>
     <string name="translation_tap_to_hide">Tap anywhere to hide translation</string>

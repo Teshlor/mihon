@@ -634,6 +634,10 @@ class ReaderViewModel(
         mutableState.update { it.copy(autoScrollActive = active) }
     }
 
+    fun setTranslateOn(on: Boolean) {
+        mutableState.update { it.copy(translateOn = on) }
+    }
+
     fun openChapterBookmarksDialog() {
         mutableState.update { it.copy(dialog = Dialog.ChapterBookmarks) }
     }
@@ -1084,6 +1088,12 @@ class ReaderViewModel(
          * show an indicator, since auto-scroll otherwise has no visible sign it is running.
          */
         val autoScrollActive: Boolean = false,
+
+        /**
+         * Whether the long-strip viewer translates pages as they scroll. Session only: kept here
+         * so it survives the activity being recreated, but never saved.
+         */
+        val translateOn: Boolean = false,
     ) {
         val currentChapter: ReaderChapter?
             get() = viewerChapters?.currChapter

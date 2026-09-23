@@ -84,6 +84,7 @@ import eu.kanade.tachiyomi.ui.reader.translation.ReaderTranslationHost
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewer
+import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.readerBackgroundColor
@@ -546,7 +547,8 @@ class ReaderActivity : BaseActivity() {
             onOpenInWebView = ::openChapterInWebView.takeIf { isHttpSource },
             onOpenInBrowser = ::openChapterInBrowser.takeIf { isHttpSource },
             onShare = ::shareChapter.takeIf { isHttpSource },
-            onTranslate = ::translateScreen.takeIf { PageTranslation.isAvailable },
+            onTranslate = ::onTranslateClicked.takeIf { PageTranslation.isAvailable },
+            translateOn = state.translateOn.takeIf { state.viewer is WebtoonViewer },
             onOpenChapterBookmarks = viewModel::openChapterBookmarksDialog,
 
             chapterNavigatorType = if (!verticalNavigator) {
@@ -629,6 +631,7 @@ class ReaderActivity : BaseActivity() {
             binding.viewerContainer.removeAllViews()
         }
         viewModel.onViewerLoaded(newViewer)
+        (newViewer as? WebtoonViewer)?.setTranslationEnabled(viewModel.state.value.translateOn)
         updateViewerInset(readerPreferences.fullscreen.get(), readerPreferences.drawUnderCutout.get())
         binding.viewerContainer.addView(newViewer.getView())
 
@@ -673,6 +676,21 @@ class ReaderActivity : BaseActivity() {
         assistUrl?.let {
             val intent = it.toUri().toShareIntent(this, type = "text/plain")
             startActivity(intent)
+        }
+    }
+
+    /**
+     * In the long-strip viewer, turns translate-as-you-scroll on or off. The paged viewers
+     * translate what is on screen once.
+     */
+    private fun onTranslateClicked() {
+        val viewer = viewModel.state.value.viewer
+        if (viewer is WebtoonViewer) {
+            val on = !viewModel.state.value.translateOn
+            viewModel.setTranslateOn(on)
+            viewer.setTranslationEnabled(on)
+        } else {
+            translateScreen()
         }
     }
 
