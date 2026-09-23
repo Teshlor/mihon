@@ -3,6 +3,9 @@ import mihon.gradle.getBuildTime
 import mihon.gradle.getLatestCommitCount
 import mihon.gradle.getLatestCommitSha
 import mihon.gradle.tasks.ReplaceShortcutsPlaceholderTask
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedComponentResult
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import java.io.FileInputStream
 import java.util.Properties
 import kotlin.io.encoding.Base64
@@ -26,6 +29,7 @@ if (Config.includeTelemetry) {
 }
 
 val keystorePropertiesFile = rootProject.file("keystore.properties")
+val fossBuildType = "foss"
 
 android {
     namespace = "eu.kanade.tachiyomi"
@@ -124,6 +128,12 @@ android {
     sourceSets {
         getByName("nightly").res.directories.add("src/debug/res")
         getByName("benchmark").res.directories.add("src/debug/res")
+
+        // Page translation is opt-in at build time (-Pinclude-mlkit) and never part of foss.
+        buildTypes.names.forEach { name ->
+            val withMlKit = Config.includeMlKit && name != fossBuildType
+            getByName(name).kotlin.directories.add(if (withMlKit) "src/mlkit/kotlin" else "src/noop/kotlin")
+        }
     }
 
     splits {
@@ -179,6 +189,38 @@ android {
         checkReleaseBuilds = false
     }
 }
+
+val checkFossHasNoGoogleServices = tasks.register("checkFossHasNoGoogleServices") {
+    group = "verification"
+    description = "Fails if the foss runtime classpath contains Google Play services, ML Kit or Firebase"
+    val forbiddenGroups = listOf("com.google.android.gms", "com.google.mlkit", "com.google.firebase")
+    val offenders = configurations.named("${fossBuildType}RuntimeClasspath").flatMap { configuration ->
+        configuration.incoming.resolutionResult.rootComponent.map { root ->
+            val seen = linkedSetOf<ResolvedComponentResult>()
+            fun walk(component: ResolvedComponentResult) {
+                if (!seen.add(component)) return
+                component.dependencies.filterIsInstance<ResolvedDependencyResult>().forEach { walk(it.selected) }
+            }
+            walk(root)
+            seen.map { it.id }
+                .filterIsInstance<ModuleComponentIdentifier>()
+                .filter { id -> forbiddenGroups.any { id.group == it || id.group.startsWith("$it.") } }
+                .map { "${it.group}:${it.module}:${it.version}" }
+                .sorted()
+        }
+    }
+    doLast {
+        val found = offenders.get()
+        if (found.isNotEmpty()) {
+            val heading = "The foss build must not contain Google Play services, ML Kit or Firebase:"
+            throw GradleException(found.joinToString("\n", prefix = "$heading\n"))
+        }
+    }
+}
+tasks.matching { it.name == "assembleFoss" || it.name == "bundleFoss" }.configureEach {
+    dependsOn(checkFossHasNoGoogleServices)
+}
+tasks.named("check") { dependsOn(checkFossHasNoGoogleServices) }
 
 kotlin {
     compilerOptions {
@@ -327,8 +369,12 @@ dependencies {
     // String similarity
     implementation(libs.stringSimilarity)
 
-    // On-device text recognition and translation for translating pages in the reader
-    implementation(libs.bundles.mlkit)
+    // On-device page translation (ML Kit). Opt in with -Pinclude-mlkit; foss never gets it.
+    if (Config.includeMlKit) {
+        android.buildTypes.names.filter { it != fossBuildType }.forEach { name ->
+            addProvider("${name}Implementation", libs.bundles.mlkit)
+        }
+    }
 
     // Tests
     testImplementation(libs.bundles.test)

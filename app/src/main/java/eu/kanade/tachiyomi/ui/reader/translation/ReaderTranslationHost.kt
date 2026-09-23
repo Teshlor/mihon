@@ -59,7 +59,7 @@ class ReaderTranslationHost(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    private val translator = PageTranslator(activity.applicationContext)
+    private val translator = PageTranslation.create(activity.applicationContext)
     private var job: Job? = null
 
     /**
@@ -82,7 +82,7 @@ class ReaderTranslationHost(
                         image = screenshot,
                         sourceTag = readerPreferences.translationSourceLanguage.get(),
                         targetTag = readerPreferences.translationTargetLanguage.get()
-                            .ifEmpty { PageTranslator.defaultTargetLanguage },
+                            .ifEmpty { PageTranslation.defaultTargetLanguage },
                         onDownloadingModel = { _state.value = State.Working(downloadingModel = true) },
                     )
                 } finally {
@@ -99,6 +99,9 @@ class ReaderTranslationHost(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: TranslationNeedsWifiException) {
+                activity.toast(MR.strings.translation_needs_wifi, Toast.LENGTH_LONG)
+                _state.value = State.Idle
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "Failed to translate page" }
                 // Include the reason, so a failure can be told apart from the others and fixed.

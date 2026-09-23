@@ -10,7 +10,8 @@ import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
-import eu.kanade.tachiyomi.ui.reader.translation.PageTranslator
+import eu.kanade.tachiyomi.ui.reader.translation.PageTranslation
+import eu.kanade.tachiyomi.ui.reader.translation.languageDisplayName
 import eu.kanade.tachiyomi.util.system.hasDisplayCutout
 import mihon.app.di.appGraph
 import tachiyomi.i18n.MR
@@ -30,7 +31,7 @@ object SettingsReaderScreen : SearchableSettings {
         val context = LocalContext.current
         val readerPref = remember { context.appGraph.readerPreferences }
 
-        return listOf(
+        return listOfNotNull(
             Preference.PreferenceItem.ListPreference(
                 preference = readerPref.defaultReadingMode,
                 entries = ReadingMode.entries.drop(1)
@@ -67,7 +68,7 @@ object SettingsReaderScreen : SearchableSettings {
             getWebtoonGroup(readerPreferences = readerPref),
             getNavigationGroup(readerPreferences = readerPref),
             getActionsGroup(readerPreferences = readerPref),
-            getTranslationGroup(readerPreferences = readerPref),
+            if (PageTranslation.isAvailable) getTranslationGroup(readerPreferences = readerPref) else null,
         )
     }
 
@@ -502,7 +503,7 @@ object SettingsReaderScreen : SearchableSettings {
 
     @Composable
     private fun getTranslationGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
-        val targetLanguages = remember { PageTranslator.targetLanguages }
+        val targetLanguages = remember { PageTranslation.targetLanguages }
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_translation),
             preferenceItems = listOf(
@@ -511,14 +512,14 @@ object SettingsReaderScreen : SearchableSettings {
                 ),
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.translationSourceLanguage,
-                    entries = PageTranslator.SOURCE_LANGUAGES
-                        .associateWith { PageTranslator.displayName(it) },
+                    entries = PageTranslation.sourceLanguages
+                        .associateWith { languageDisplayName(it) },
                     title = stringResource(MR.strings.pref_translation_source),
                 ),
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.translationTargetLanguage,
                     entries = mapOf("" to stringResource(MR.strings.pref_translation_target_default)) +
-                        targetLanguages.associateWith { PageTranslator.displayName(it) },
+                        targetLanguages.associateWith { languageDisplayName(it) },
                     title = stringResource(MR.strings.pref_translation_target),
                 ),
             ),

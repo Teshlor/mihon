@@ -79,6 +79,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import eu.kanade.tachiyomi.ui.reader.translation.PageTranslation
 import eu.kanade.tachiyomi.ui.reader.translation.ReaderTranslationHost
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
@@ -545,7 +546,7 @@ class ReaderActivity : BaseActivity() {
             onOpenInWebView = ::openChapterInWebView.takeIf { isHttpSource },
             onOpenInBrowser = ::openChapterInBrowser.takeIf { isHttpSource },
             onShare = ::shareChapter.takeIf { isHttpSource },
-            onTranslate = { translationHost.translateScreen(binding.readerContainer, binding.composeOverlay) },
+            onTranslate = ::translateScreen.takeIf { PageTranslation.isAvailable },
             onOpenChapterBookmarks = viewModel::openChapterBookmarksDialog,
 
             chapterNavigatorType = if (!verticalNavigator) {
@@ -673,6 +674,10 @@ class ReaderActivity : BaseActivity() {
             val intent = it.toUri().toShareIntent(this, type = "text/plain")
             startActivity(intent)
         }
+    }
+
+    private fun translateScreen() {
+        translationHost.translateScreen(binding.readerContainer, binding.composeOverlay)
     }
 
     private fun showReadingModeToast(mode: Int) {

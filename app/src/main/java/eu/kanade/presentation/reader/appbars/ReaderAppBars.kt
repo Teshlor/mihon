@@ -55,7 +55,7 @@ fun ReaderAppBars(
     onOpenInWebView: (() -> Unit)?,
     onOpenInBrowser: (() -> Unit)?,
     onShare: (() -> Unit)?,
-    onTranslate: () -> Unit,
+    onTranslate: (() -> Unit)?,
     onOpenChapterBookmarks: () -> Unit,
 
     chapterNavigatorType: ChapterNavigatorType,

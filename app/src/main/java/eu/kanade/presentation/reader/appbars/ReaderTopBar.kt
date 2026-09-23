@@ -22,7 +22,7 @@ fun ReaderTopBar(
     onOpenInWebView: (() -> Unit)?,
     onOpenInBrowser: (() -> Unit)?,
     onShare: (() -> Unit)?,
-    onTranslate: () -> Unit,
+    onTranslate: (() -> Unit)?,
     onOpenChapterBookmarks: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -52,13 +52,15 @@ fun ReaderTopBar(
                             onClick = onToggleBookmarked,
                         ),
                     )
-                    add(
-                        AppBar.Action(
-                            title = stringResource(MR.strings.action_translate_page),
-                            icon = MaterialSymbols.Rounded.Translate,
-                            onClick = onTranslate,
-                        ),
-                    )
+                    onTranslate?.let {
+                        add(
+                            AppBar.Action(
+                                title = stringResource(MR.strings.action_translate_page),
+                                icon = MaterialSymbols.Rounded.Translate,
+                                onClick = it,
+                            ),
+                        )
+                    }
                     add(
                         AppBar.OverflowAction(
                             title = stringResource(MR.strings.action_chapter_bookmarks),
