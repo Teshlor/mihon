@@ -220,7 +220,6 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
             object : RecyclerView.OnScrollListener() {
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                     onScrolled()
-                    if (translationEnabled) updateTranslationFocus()
 
                     if ((dy > threshold || dy < -threshold) && activity.viewModel.state.value.menuVisible) {
                         activity.hideMenu()
@@ -368,7 +367,6 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         if (enabled) {
             translationScheduler().resetNotices()
             forEachPageHolder { it.startTranslation() }
-            updateTranslationFocus()
         } else {
             forEachPageHolder { it.stopTranslation() }
             translationScheduler?.cancelAll()
@@ -413,16 +411,6 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         rotateToFit = config.dualPageRotateToFit,
         rotateToFitInvert = config.dualPageRotateToFitInvert,
     )
-
-    /**
-     * Tells the translator which page is in the middle of the screen, so it goes first.
-     */
-    private fun updateTranslationFocus() {
-        val scheduler = translationScheduler ?: return
-        val child = recycler.findChildViewUnder(recycler.width / 2f, recycler.height / 2f) ?: return
-        val position = recycler.getChildAdapterPosition(child)
-        if (position != RecyclerView.NO_POSITION) scheduler.setFocus(position)
-    }
 
     private inline fun forEachPageHolder(action: (WebtoonPageHolder) -> Unit) {
         for (i in 0..<recycler.childCount) {

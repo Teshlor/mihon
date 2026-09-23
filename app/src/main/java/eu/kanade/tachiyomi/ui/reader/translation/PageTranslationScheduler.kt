@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.recyclerview.widget.RecyclerView
+import eu.kanade.tachiyomi.ui.reader.translation.engine.BandPriority
 import eu.kanade.tachiyomi.ui.reader.translation.engine.Box
 import eu.kanade.tachiyomi.ui.reader.translation.engine.LineGrouper
 import eu.kanade.tachiyomi.ui.reader.translation.engine.PatchColour
@@ -23,17 +24,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
-import kotlin.math.abs
 
 /**
- * Translates the pages of the long-strip reader in the background, the page in the middle of the
- * screen first, and hands each page's holder its translation band by band as it lands.
+ * Translates the pages of the long-strip reader in the background and hands each page's holder its
+ * translation band by band as it lands. Bands are read in any order, the one the reader is about to
+ * reach first, whichever page it is on (see [BandPriority]).
  *
  * One page band is read at a time, and one band's text is translated at a time, so there is
- * exactly one recognizer and one translator in flight. After every band the next one is picked
- * again, so scrolling or jumping re-prioritises within one band's work. Pixel work runs on
- * [Dispatchers.Default]; the main thread only copies the band out of the page bitmap (the same
- * thread that recycles that bitmap, so the two can never race) and publishes results.
+ * exactly one recognizer and one translator in flight. After every band the next band to read, and
+ * the next to translate, is picked again from where the pages are on screen right now, so scrolling
+ * or jumping re-prioritises within one band's work. Pixel work runs on [Dispatchers.Default]; the
+ * main thread only copies the band out of the page bitmap (the same thread that recycles that
+ * bitmap, so the two can never race) and publishes results.
  *
  * Everything public is main thread only.
  */
@@ -95,9 +97,11 @@ class PageTranslationScheduler(
     }
     private val jobs = LinkedHashMap<TranslationKey, PageJob>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
-    private val translateQueue = Channel<BandResult>(Channel.UNLIMITED)
 
-    private var focus = 0
+    /** Bands read and waiting to be translated, in the order they were read. */
+    private val results = mutableListOf<BandResult>()
+    private val resultsWake = Channel<Unit>(Channel.CONFLATED)
+
     private var modelsReady: Pair<String, String>? = null
     private var modelsRetryAtMillis = 0L
     private var wifiNoticeShown = false
@@ -151,16 +155,6 @@ class PageTranslationScheduler(
     init {
         scope.launch { recognizeLoop() }
         scope.launch { translateLoop() }
-    }
-
-    /**
-     * Sets the adapter position of the page in the middle of the screen, which is translated
-     * first.
-     */
-    fun setFocus(position: Int) {
-        if (position == focus) return
-        focus = position
-        wake.trySend(Unit)
     }
 
     /**
@@ -240,6 +234,8 @@ class PageTranslationScheduler(
             it.target = null
         }
         jobs.clear()
+        // Lets the translator drop the results it was still to translate.
+        resultsWake.trySend(Unit)
         if (TranslatePerf.ENABLED) perf?.flush()
     }
 
@@ -255,7 +251,7 @@ class PageTranslationScheduler(
     fun destroy() {
         cancelAll() // Also logs the last performance summary.
         scope.cancel()
-        translateQueue.close()
+        results.clear()
         // Any recognition or translation still running in ML Kit fails harmlessly once closed.
         translator.close()
         cache.clear()
@@ -289,7 +285,7 @@ class PageTranslationScheduler(
             }
             val (job, bandIndex) = next
             if (!ensureModels(job.key.sourceLang, job.key.targetLang)) {
-                // Waiting for Wi-Fi, or for Play services. Try again on the next scroll, or soon.
+                // Waiting for Wi-Fi, or for Play services. Try again when a page asks, or soon.
                 withTimeoutOrNull(MODELS_RETRY_MILLIS) { wake.receive() }
                 continue
             }
@@ -298,21 +294,39 @@ class PageTranslationScheduler(
     }
 
     /**
-     * The next band to read, of the runnable page closest to the focus, or null when there is
-     * nothing to do.
+     * The band to read next, over every page, by [BandPriority], or null when there is nothing to
+     * do. Where the pages are on screen is read now, so scrolling needs no bookkeeping.
      */
     private fun pickNext(): Pair<PageJob, Int>? {
-        val job = jobs.values
-            .filter { !it.abandoned && it.reading.isEmpty() && !it.isRecognized }
-            .mapNotNull { job ->
-                val position = job.target?.position ?: return@mapNotNull null
-                if (position == RecyclerView.NO_POSITION) null else job to priorityOf(position, focus)
+        var best: PageJob? = null
+        var bestBand = -1
+        var bestPriority = Float.POSITIVE_INFINITY
+        for (job in jobs.values) {
+            if (job.abandoned || job.isRecognized) continue
+            val position = job.target?.position ?: continue
+            if (position == RecyclerView.NO_POSITION) continue
+            for (band in job.bands) {
+                if (band.index in job.done || band.index in job.reading) continue
+                val priority = priorityOf(job, band)
+                if (priority < bestPriority) {
+                    best = job
+                    bestBand = band.index
+                    bestPriority = priority
+                }
             }
-            .minByOrNull { it.second }
-            ?.first
-            ?: return null
-        val band = job.bands.first { it.index !in job.done && it.index !in job.reading }
-        return job to band.index
+        }
+        return best?.let { it to bestBand }
+    }
+
+    /**
+     * [BandPriority] of [band] of [job]'s page, where the page is on screen right now.
+     */
+    private fun priorityOf(job: PageJob, band: StripPlanner.Band): Float {
+        val target = job.target ?: return BandPriority.DETACHED
+        val top = target.topInViewport ?: return BandPriority.DETACHED
+        val width = target.viewWidth
+        if (width <= 0) return BandPriority.DETACHED
+        return BandPriority.of(top + band.bottom * width.toFloat() / job.bitmapWidth, target.viewportHeight)
     }
 
     private suspend fun ensureModels(source: String, target: String): Boolean {
@@ -406,7 +420,9 @@ class PageTranslationScheduler(
             job.done += bandIndex
             job.held = advance.carried
             if (!job.abandoned) {
-                handedOff = translateQueue.trySend(BandResult(job, bandIndex, drafts)).isSuccess
+                results += BandResult(job, bandIndex, drafts)
+                resultsWake.trySend(Unit)
+                handedOff = true
             }
         } finally {
             job.reading -= bandIndex
@@ -478,7 +494,12 @@ class PageTranslationScheduler(
     }
 
     private suspend fun translateLoop() {
-        for (result in translateQueue) {
+        while (scope.isActive) {
+            val result = takeResult()
+            if (result == null) {
+                resultsWake.receive()
+                continue
+            }
             val job = result.job
             try {
                 attempt { translateBand(result) }.onFailure { e ->
@@ -490,6 +511,21 @@ class PageTranslationScheduler(
                 finishInFlight(job)
             }
         }
+    }
+
+    /**
+     * Takes the waiting result whose band comes first by [BandPriority], the earliest read among
+     * equals, after dropping the results of abandoned pages. Null when none is waiting.
+     */
+    private fun takeResult(): BandResult? {
+        val abandoned = results.filter { it.job.abandoned }
+        if (abandoned.isNotEmpty()) {
+            results.removeAll(abandoned)
+            abandoned.forEach { finishInFlight(it.job) }
+        }
+        val next = results.minByOrNull { priorityOf(it.job, it.job.bands[it.bandIndex]) } ?: return null
+        results.remove(next)
+        return next
     }
 
     /**
@@ -662,17 +698,6 @@ class PageTranslationScheduler(
         const val PIPELINE_VERSION = 1
 
         private const val MODELS_RETRY_MILLIS = 30_000L
-
-        /**
-         * Lower is sooner: the page in the middle of the screen, then the next three, then the one
-         * behind, then everything else by distance.
-         */
-        fun priorityOf(pageIndex: Int, centreIndex: Int): Int = when (val d = pageIndex - centreIndex) {
-            0 -> 0
-            in 1..3 -> d
-            -1 -> 4
-            else -> 10 + abs(d)
-        }
     }
 }
 
