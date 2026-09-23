@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -281,27 +283,27 @@ class PageTranslationScheduler(
         val pair = source to target
         if (modelsReady == pair) return true
         if (SystemClock.uptimeMillis() < modelsRetryAtMillis) return false
-        return try {
+        val outcome = attempt {
             translator.ensureModels(source, target) {
                 logcat { "Downloading translation models for $source -> $target" }
             }
+        }
+        val e = outcome.exceptionOrNull()
+        if (e == null) {
             modelsReady = pair
-            true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: TranslationNeedsWifiException) {
-            modelsRetryAtMillis = SystemClock.uptimeMillis() + MODELS_RETRY_MILLIS
+            return true
+        }
+        modelsRetryAtMillis = SystemClock.uptimeMillis() + MODELS_RETRY_MILLIS
+        if (e is TranslationNeedsWifiException) {
             if (!wifiNoticeShown) {
                 wifiNoticeShown = true
                 listener.onNeedsWifi()
             }
-            false
-        } catch (e: Exception) {
+        } else {
             logcat(LogPriority.ERROR, e) { "Couldn't prepare translation models" }
-            modelsRetryAtMillis = SystemClock.uptimeMillis() + MODELS_RETRY_MILLIS
             notifyFailure(e)
-            false
         }
+        return false
     }
 
     private suspend fun recognizeNextBand(job: PageJob) {
@@ -320,27 +322,27 @@ class PageTranslationScheduler(
         var handedOff = false
         try {
             val source = job.key.sourceLang
-            val (advance, drafts) = try {
+            val outcome = attempt {
                 val lines = withContext(Dispatchers.Default) { translator.recognize(copy, source) }
                 withContext(Dispatchers.Default) {
                     val found = lines.map { it.copy(box = it.box.offset(0f, band.top.toFloat())) }
                     val advance = StripPlanner.advance(job.bands, bandIndex, job.carried, found, LineGrouper::group)
                     advance to advance.publish.mapNotNull { draft(it, copy, band, job, source) }
                 }
-            } finally {
-                copy.recycle()
+            }
+            // Only once ML Kit is done with the copy. When this coroutine is cancelled (attempt
+            // rethrows) or the recognition fails, ML Kit may still be reading it, so the GC takes it.
+            if (outcome.isSuccess) copy.recycle()
+            val (advance, drafts) = outcome.getOrElse { e ->
+                logcat(LogPriority.ERROR, e) { "Couldn't read page ${job.key.pageIndex} band $bandIndex" }
+                fail(job, e)
+                return
             }
             job.nextBand = bandIndex + 1
             job.carried = advance.carried
             if (!job.abandoned) {
-                translateQueue.send(BandResult(job, bandIndex + 1, drafts, advance.carried))
-                handedOff = true
+                handedOff = translateQueue.trySend(BandResult(job, bandIndex + 1, drafts, advance.carried)).isSuccess
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e) { "Couldn't read page ${job.key.pageIndex} band $bandIndex" }
-            fail(job, e)
         } finally {
             job.recognizing = false
             if (!handedOff) finishInFlight(job)
@@ -414,46 +416,52 @@ class PageTranslationScheduler(
         for (result in translateQueue) {
             val job = result.job
             try {
-                val texts = result.drafts.map { it.original }
-                val translated = if (texts.isEmpty()) {
-                    emptyList()
-                } else {
-                    withContext(Dispatchers.Default) {
-                        translator.translateText(texts, job.key.sourceLang, job.key.targetLang)
-                    }
+                attempt { translateBand(result) }.onFailure { e ->
+                    logcat(LogPriority.ERROR, e) { "Couldn't translate page ${job.key.pageIndex}" }
+                    fail(job, e)
                 }
-                if (job.abandoned) continue
-
-                val bubbles = result.drafts.zip(translated) { draft, english ->
-                    Bubble(
-                        rectNorm = draft.rectNorm,
-                        lineHeightNorm = draft.lineHeightNorm,
-                        original = draft.original,
-                        translated = english.ifBlank { draft.original },
-                        confidence = draft.confidence,
-                        fill = BubbleFill.Patch(draft.fill),
-                    )
-                }
-                val before = job.blocks.size
-                job.blocks += bubbles
-                val done = result.bandsDone >= job.bands.size
-                cache[job.key] = TranslatedPage(
-                    status = if (done) PageStatus.Complete else PageStatus.Partial(result.bandsDone),
-                    blocks = job.blocks.toList(),
-                    bitmapWidth = job.bitmapWidth,
-                    bitmapHeight = job.bitmapHeight,
-                    carried = result.carried,
-                )
-                if (bubbles.isNotEmpty()) publish(job, before)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logcat(LogPriority.ERROR, e) { "Couldn't translate page ${job.key.pageIndex}" }
-                fail(job, e)
             } finally {
                 finishInFlight(job)
             }
         }
+    }
+
+    /**
+     * Translates one band's bubbles, adds them to the page and shows them.
+     */
+    private suspend fun translateBand(result: BandResult) {
+        val job = result.job
+        val texts = result.drafts.map { it.original }
+        val translated = if (texts.isEmpty()) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.Default) {
+                translator.translateText(texts, job.key.sourceLang, job.key.targetLang)
+            }
+        }
+        if (job.abandoned) return
+
+        val bubbles = result.drafts.zip(translated) { draft, english ->
+            Bubble(
+                rectNorm = draft.rectNorm,
+                lineHeightNorm = draft.lineHeightNorm,
+                original = draft.original,
+                translated = english.ifBlank { draft.original },
+                confidence = draft.confidence,
+                fill = BubbleFill.Patch(draft.fill),
+            )
+        }
+        val before = job.blocks.size
+        job.blocks += bubbles
+        val done = result.bandsDone >= job.bands.size
+        cache[job.key] = TranslatedPage(
+            status = if (done) PageStatus.Complete else PageStatus.Partial(result.bandsDone),
+            blocks = job.blocks.toList(),
+            bitmapWidth = job.bitmapWidth,
+            bitmapHeight = job.bitmapHeight,
+            carried = result.carried,
+        )
+        if (bubbles.isNotEmpty()) publish(job, before)
     }
 
     /**
@@ -481,7 +489,7 @@ class PageTranslationScheduler(
         if (job.target === target && !job.abandoned) target.show(all, fadeInFrom = firstNew)
     }
 
-    private fun fail(job: PageJob, e: Exception) {
+    private fun fail(job: PageJob, e: Throwable) {
         // A job replaced or cancelled meanwhile no longer speaks for its page.
         if (job.abandoned) return
         job.abandoned = true
@@ -495,7 +503,7 @@ class PageTranslationScheduler(
         notifyFailure(e)
     }
 
-    private fun notifyFailure(e: Exception) {
+    private fun notifyFailure(e: Throwable) {
         if (failureNoticeShown) return
         failureNoticeShown = true
         listener.onFailed(e.message?.takeIf { it.isNotBlank() } ?: e::class.simpleName.orEmpty())
@@ -530,3 +538,19 @@ class PageTranslationScheduler(
         }
     }
 }
+
+/**
+ * Runs one piece of background work and returns what it threw instead of throwing it, so one page
+ * that fails can't stop the loop working through them.
+ *
+ * What it threw is rethrown only when the calling coroutine has itself been cancelled. A
+ * [CancellationException] while the coroutine is still active came from the work, such as an ML
+ * Kit Task that was cancelled (its await() throws one), and is that work's failure.
+ */
+internal suspend inline fun <T> attempt(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: Exception) {
+        currentCoroutineContext().ensureActive()
+        Result.failure(e)
+    }
