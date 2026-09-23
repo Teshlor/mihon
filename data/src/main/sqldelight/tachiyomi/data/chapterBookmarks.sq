@@ -1,0 +1,41 @@
+CREATE TABLE chapter_bookmarks(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    chapter_id INTEGER NOT NULL,
+    page_index INTEGER NOT NULL,
+    -- How far into page_index the spot is, as a fraction of that page's height.
+    page_offset REAL NOT NULL DEFAULT 0.0,
+    created_at INTEGER NOT NULL,
+    -- Optional label. Declared last so a fresh table matches one upgraded by ALTER TABLE.
+    note TEXT,
+    FOREIGN KEY(chapter_id) REFERENCES chapters (_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX chapter_bookmarks_chapter_id_index ON chapter_bookmarks(chapter_id);
+
+getByChapterId:
+SELECT *
+FROM chapter_bookmarks
+WHERE chapter_id = :chapterId
+ORDER BY page_index ASC, page_offset ASC;
+
+getByMangaId:
+SELECT CB.*, C.url AS chapter_url, C.name AS chapter_name
+FROM chapter_bookmarks CB
+JOIN chapters C
+ON C._id = CB.chapter_id
+WHERE C.manga_id = :mangaId
+ORDER BY C.source_order ASC, CB.page_index ASC, CB.page_offset ASC;
+
+insert:
+INSERT INTO chapter_bookmarks(chapter_id, page_index, page_offset, created_at, note)
+VALUES (:chapterId, :pageIndex, :pageOffset, :createdAt, :note);
+
+updateNote:
+UPDATE chapter_bookmarks
+SET note = :note
+WHERE _id = :id;
+
+deleteById:
+DELETE FROM chapter_bookmarks
+WHERE _id = :id;

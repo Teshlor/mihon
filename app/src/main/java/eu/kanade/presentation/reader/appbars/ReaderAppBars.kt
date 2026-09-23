@@ -56,6 +56,7 @@ fun ReaderAppBars(
     onOpenInBrowser: (() -> Unit)?,
     onShare: (() -> Unit)?,
     onTranslate: () -> Unit,
+    onOpenChapterBookmarks: () -> Unit,
 
     chapterNavigatorType: ChapterNavigatorType,
     verticalNavigatorHeight: Float,
@@ -99,6 +100,7 @@ fun ReaderAppBars(
                 onOpenInBrowser = onOpenInBrowser,
                 onShare = onShare,
                 onTranslate = onTranslate,
+                onOpenChapterBookmarks = onOpenChapterBookmarks,
             )
         }
 

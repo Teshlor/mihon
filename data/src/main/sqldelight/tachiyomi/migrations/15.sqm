@@ -1,0 +1,4 @@
+-- Track how far into the last read page the reader had scrolled, as a fraction of that page's
+-- height. Long strip pages are tall enough that a page index alone can drop the reader a long way
+-- from where they stopped.
+ALTER TABLE chapters ADD COLUMN last_page_offset REAL NOT NULL DEFAULT 0.0;

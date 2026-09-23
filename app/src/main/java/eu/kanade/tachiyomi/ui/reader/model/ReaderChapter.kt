@@ -22,6 +22,11 @@ data class ReaderChapter(val chapter: Chapter) {
 
     var requestedPage: Int = 0
 
+    /**
+     * How far into [requestedPage] to scroll on open, as a fraction of that page's height.
+     */
+    var requestedPageOffset: Double = 0.0
+
     private var references = 0
 
     constructor(chapter: tachiyomi.domain.chapter.model.Chapter) : this(chapter.toDbChapter())

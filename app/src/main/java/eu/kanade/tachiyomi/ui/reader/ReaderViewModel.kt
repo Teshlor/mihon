@@ -75,8 +75,13 @@ import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.chapter.interactor.AddChapterBookmark
+import tachiyomi.domain.chapter.interactor.DeleteChapterBookmark
+import tachiyomi.domain.chapter.interactor.GetChapterBookmarks
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.UpdateChapter
+import tachiyomi.domain.chapter.interactor.UpdateChapterBookmarkNote
+import tachiyomi.domain.chapter.model.ChapterBookmark
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.download.service.DownloadPreferences
@@ -113,6 +118,10 @@ class ReaderViewModel(
     private val getNextChapters: GetNextChapters,
     private val upsertHistory: UpsertHistory,
     private val updateChapter: UpdateChapter,
+    private val getChapterBookmarks: GetChapterBookmarks,
+    private val addChapterBookmark: AddChapterBookmark,
+    private val deleteChapterBookmark: DeleteChapterBookmark,
+    private val updateChapterBookmarkNote: UpdateChapterBookmarkNote,
     private val setMangaViewerFlags: SetMangaViewerFlags,
     private val getIncognitoState: GetIncognitoState,
     private val libraryPreferences: LibraryPreferences,
@@ -172,6 +181,8 @@ class ReaderViewModel(
     /**
      * The visible page index of the currently loaded chapter. Used to restore from process kill.
      */
+    private var pendingInitialPageOffset = savedState.get<Double>("page_offset") ?: 0.0
+
     private var chapterPageIndex = savedState.get<Int>("page_index") ?: -1
         set(value) {
             savedState["page_index"] = value
@@ -282,8 +293,15 @@ class ReaderViewModel(
                 if (chapterPageIndex >= 0) {
                     // Restore from SavedState
                     currentChapter.requestedPage = chapterPageIndex
+                    // Only set when opened at a specific spot, such as following a bookmark, and
+                    // consumed once so later chapters resume normally.
+                    if (pendingInitialPageOffset > 0.0) {
+                        currentChapter.requestedPageOffset = pendingInitialPageOffset
+                        pendingInitialPageOffset = 0.0
+                    }
                 } else if (!currentChapter.chapter.read) {
                     currentChapter.requestedPage = currentChapter.chapter.last_page_read
+                    currentChapter.requestedPageOffset = currentChapter.chapter.last_page_offset
                 }
                 chapterId = currentChapter.chapter.id!!
             }
@@ -590,6 +608,73 @@ class ReaderViewModel(
                 ),
             )
         }
+    }
+
+    /**
+     * Persists how far into the current page the reader had scrolled, so reopening the chapter
+     * resumes at the same spot rather than at the top of a page that may be very tall.
+     */
+    suspend fun saveScrollOffset(offset: Double) {
+        if (incognitoMode) return
+        val readerChapter = getCurrentChapter() ?: return
+        val chapterId = readerChapter.chapter.id ?: return
+        if (readerChapter.chapter.last_page_offset == offset) return
+
+        readerChapter.chapter.last_page_offset = offset
+        readerChapter.requestedPageOffset = offset
+        updateChapter.await(
+            ChapterUpdate(
+                id = chapterId,
+                lastPageOffset = offset,
+            ),
+        )
+    }
+
+    fun setAutoScrollActive(active: Boolean) {
+        mutableState.update { it.copy(autoScrollActive = active) }
+    }
+
+    fun openChapterBookmarksDialog() {
+        mutableState.update { it.copy(dialog = Dialog.ChapterBookmarks) }
+    }
+
+    /**
+     * Bookmarks the spot the reader is currently looking at, which is the selected page plus how
+     * far into it the viewer has scrolled.
+     */
+    suspend fun bookmarkCurrentPosition(pageOffset: Double) {
+        val readerChapter = getCurrentChapter() ?: return
+        val chapterId = readerChapter.chapter.id ?: return
+        val pageIndex = (state.value.currentPage - 1).coerceAtLeast(0)
+        addChapterBookmark.await(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            pageOffset = pageOffset,
+            createdAt = Clock.System.now().toEpochMilliseconds(),
+        )
+    }
+
+    suspend fun getCurrentChapterBookmarks(): List<ChapterBookmark> {
+        val chapterId = getCurrentChapter()?.chapter?.id ?: return emptyList()
+        return getChapterBookmarks.await(chapterId)
+    }
+
+    suspend fun removeChapterBookmark(id: Long) {
+        deleteChapterBookmark.await(id)
+    }
+
+    suspend fun setChapterBookmarkNote(id: Long, note: String?) {
+        updateChapterBookmarkNote.await(id, note)
+    }
+
+    /**
+     * Returns the page a [bookmark] points at, if it belongs to the chapter currently open.
+     */
+    fun pageForBookmark(bookmark: ChapterBookmark): ReaderPage? {
+        val readerChapter = getCurrentChapter() ?: return null
+        if (readerChapter.chapter.id != bookmark.chapterId) return null
+        val pages = readerChapter.pages ?: return null
+        return pages.getOrNull(bookmark.pageIndex)
     }
 
     private suspend fun updateChapterProgressOnComplete(readerChapter: ReaderChapter) {
@@ -993,6 +1078,12 @@ class ReaderViewModel(
         val dialog: Dialog? = null,
         val menuVisible: Boolean = false,
         @IntRange(from = -100, to = 100) val brightnessOverlayValue: Int = 0,
+
+        /**
+         * Whether the viewer is currently auto-scrolling. Reported by the viewer so the overlay can
+         * show an indicator, since auto-scroll otherwise has no visible sign it is running.
+         */
+        val autoScrollActive: Boolean = false,
     ) {
         val currentChapter: ReaderChapter?
             get() = viewerChapters?.currChapter
@@ -1007,6 +1098,7 @@ class ReaderViewModel(
         data object ReadingModeSelect : Dialog
         data object OrientationModeSelect : Dialog
         data class PageActions(val page: ReaderPage) : Dialog
+        data object ChapterBookmarks : Dialog
     }
 
     sealed interface Event {

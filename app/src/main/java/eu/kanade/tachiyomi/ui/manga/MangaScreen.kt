@@ -28,6 +28,7 @@ import eu.kanade.presentation.components.NavigatorAdaptiveSheet
 import eu.kanade.presentation.manga.ChapterSettingsDialog
 import eu.kanade.presentation.manga.DuplicateMangaDialog
 import eu.kanade.presentation.manga.EditCoverAction
+import eu.kanade.presentation.manga.MangaBookmarksDialog
 import eu.kanade.presentation.manga.MangaScreen
 import eu.kanade.presentation.manga.components.DeleteChaptersDialog
 import eu.kanade.presentation.manga.components.MangaCoverDialog
@@ -154,6 +155,7 @@ class MangaScreen(
                 navigator.push(MigrationConfigScreen(successState.manga.id))
             }.takeIf { successState.manga.favorite },
             onEditNotesClicked = { navigator.push(MangaNotesScreen(manga = successState.manga)) },
+            onBookmarksClicked = viewModel::showChapterBookmarksDialog,
             onMultiBookmarkClicked = viewModel::bookmarkChapters,
             onMultiMarkAsReadClicked = viewModel::markChaptersRead,
             onMarkPreviousAsReadClicked = viewModel::markPreviousChapterRead,
@@ -169,6 +171,25 @@ class MangaScreen(
         val onDismissRequest = { viewModel.dismissDialog() }
         when (val dialog = successState.dialog) {
             null -> {}
+            is MangaViewModel.Dialog.ChapterBookmarks -> {
+                MangaBookmarksDialog(
+                    bookmarks = dialog.bookmarks,
+                    onDismissRequest = onDismissRequest,
+                    onJumpTo = { entry ->
+                        onDismissRequest()
+                        context.startActivity(
+                            ReaderActivity.newIntent(
+                                context = context,
+                                mangaId = successState.manga.id,
+                                chapterId = entry.bookmark.chapterId,
+                                pageIndex = entry.bookmark.pageIndex,
+                                pageOffset = entry.bookmark.pageOffset,
+                            ),
+                        )
+                    },
+                    onDelete = { entry -> viewModel.deleteChapterBookmark(entry.bookmark.id) },
+                )
+            }
             is MangaViewModel.Dialog.ChangeCategory -> {
                 ChangeCategoryDialog(
                     initialSelection = dialog.initialSelection,

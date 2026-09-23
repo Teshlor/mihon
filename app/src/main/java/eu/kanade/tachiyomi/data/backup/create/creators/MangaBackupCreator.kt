@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.data.backup.create.BackupOptions
 import eu.kanade.tachiyomi.data.backup.models.BackupChapter
 import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
+import eu.kanade.tachiyomi.data.backup.models.backupChapterBookmarkMapper
 import eu.kanade.tachiyomi.data.backup.models.backupChapterMapper
 import eu.kanade.tachiyomi.data.backup.models.backupTrackMapper
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
@@ -47,7 +48,18 @@ class MangaBackupCreator(
                 )
                 .awaitAsList()
                 .takeUnless(List<BackupChapter>::isEmpty)
-                ?.let { mangaObject.chapters = it }
+                ?.let { chapters ->
+                    // Bookmarked spots live in their own table, so attach them to the chapter they
+                    // belong to. Chapters are matched by url on restore, which is what groups these.
+                    val bookmarksByChapterUrl = database.chapterBookmarksQueries
+                        .getByMangaId(manga.id, backupChapterBookmarkMapper)
+                        .awaitAsList()
+                        .groupBy({ it.first }, { it.second })
+                    chapters.forEach { chapter ->
+                        bookmarksByChapterUrl[chapter.url]?.let { chapter.bookmarks = it }
+                    }
+                    mangaObject.chapters = chapters
+                }
         }
 
         if (options.categories) {

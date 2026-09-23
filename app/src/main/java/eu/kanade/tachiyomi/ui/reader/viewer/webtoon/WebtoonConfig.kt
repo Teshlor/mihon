@@ -40,6 +40,23 @@ class WebtoonConfig(
 
     var doubleTapZoomChangedListener: ((Boolean) -> Unit)? = null
 
+    var smoothKeyScroll = false
+        private set
+
+    var smoothKeyScrollSpeed = ReaderPreferences.HOLD_SCROLL_SPEED_DEFAULT
+        private set
+
+    var autoScrollKeyToggle = false
+        private set
+
+    var autoScrollKeyToggleChangedListener: ((Boolean) -> Unit)? = null
+
+    var autoScrollVolumeTriplePress = false
+        private set
+
+    var autoScrollSpeed = ReaderPreferences.AUTO_SCROLL_SPEED_DEFAULT
+        private set
+
     val theme = readerPreferences.readerTheme.get()
 
     init {
@@ -88,6 +105,24 @@ class WebtoonConfig(
                 { doubleTapZoom = it },
                 { doubleTapZoomChangedListener?.invoke(it) },
             )
+
+        readerPreferences.webtoonSmoothKeyScroll
+            .register({ smoothKeyScroll = it })
+
+        readerPreferences.webtoonSmoothKeyScrollSpeed
+            .register({ smoothKeyScrollSpeed = it })
+
+        readerPreferences.webtoonAutoScrollKeyToggle
+            .register(
+                { autoScrollKeyToggle = it },
+                { autoScrollKeyToggleChangedListener?.invoke(it) },
+            )
+
+        readerPreferences.webtoonAutoScrollVolumeTriplePress
+            .register({ autoScrollVolumeTriplePress = it })
+
+        readerPreferences.webtoonAutoScrollSpeed
+            .register({ autoScrollSpeed = it })
 
         readerPreferences.readerTheme.changes()
             .drop(1)

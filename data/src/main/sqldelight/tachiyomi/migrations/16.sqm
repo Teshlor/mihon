@@ -1,0 +1,13 @@
+-- Bookmarks for a specific spot inside a chapter. The existing chapters.bookmark column marks a
+-- whole chapter, which cannot express "come back to this point on this page".
+CREATE TABLE chapter_bookmarks(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    chapter_id INTEGER NOT NULL,
+    page_index INTEGER NOT NULL,
+    page_offset REAL NOT NULL DEFAULT 0.0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(chapter_id) REFERENCES chapters (_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX chapter_bookmarks_chapter_id_index ON chapter_bookmarks(chapter_id);

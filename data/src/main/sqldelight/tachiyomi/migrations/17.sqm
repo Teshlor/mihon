@@ -1,0 +1,2 @@
+-- Optional label for a bookmarked spot, so a saved position can say what it is.
+ALTER TABLE chapter_bookmarks ADD COLUMN note TEXT;

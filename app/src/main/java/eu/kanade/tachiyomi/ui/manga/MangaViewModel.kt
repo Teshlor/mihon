@@ -70,9 +70,12 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.chapter.interactor.DeleteChapterBookmark
+import tachiyomi.domain.chapter.interactor.GetChapterBookmarksByMangaId
 import tachiyomi.domain.chapter.interactor.SetMangaDefaultChapterFlags
 import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.model.ChapterBookmarkWithChapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.NoChaptersException
 import tachiyomi.domain.chapter.service.calculateChapterGap
@@ -112,6 +115,8 @@ class MangaViewModel(
     private val setMangaDefaultChapterFlags: SetMangaDefaultChapterFlags,
     private val setReadStatus: SetReadStatus,
     private val updateChapter: UpdateChapter,
+    private val getChapterBookmarksByMangaId: GetChapterBookmarksByMangaId,
+    private val deleteChapterBookmark: DeleteChapterBookmark,
     private val updateManga: UpdateManga,
     private val getCategories: GetCategories,
     private val getTracks: GetTracks,
@@ -1076,6 +1081,22 @@ class MangaViewModel(
         data object SettingsSheet : Dialog
         data object TrackSheet : Dialog
         data object FullCover : Dialog
+        data class ChapterBookmarks(val bookmarks: List<ChapterBookmarkWithChapter>) : Dialog
+    }
+
+    fun showChapterBookmarksDialog() {
+        viewModelScope.launch {
+            val bookmarks = getChapterBookmarksByMangaId.await(mangaId)
+            updateSuccessState { it.copy(dialog = Dialog.ChapterBookmarks(bookmarks)) }
+        }
+    }
+
+    fun deleteChapterBookmark(id: Long) {
+        viewModelScope.launch {
+            deleteChapterBookmark.await(id)
+            val bookmarks = getChapterBookmarksByMangaId.await(mangaId)
+            updateSuccessState { it.copy(dialog = Dialog.ChapterBookmarks(bookmarks)) }
+        }
     }
 
     fun dismissDialog() {

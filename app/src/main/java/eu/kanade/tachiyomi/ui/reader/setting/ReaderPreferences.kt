@@ -109,6 +109,47 @@ class ReaderPreferences(
 
     val webtoonSidePadding: Preference<Int> = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)
 
+    /**
+     * When enabled, holding a scroll key (volume/d-pad/page keys) in the webtoon viewer scrolls
+     * continuously for as long as the key is held instead of jumping once on release.
+     */
+    val webtoonSmoothKeyScroll: Preference<Boolean> = preferenceStore.getBoolean("webtoon_smooth_key_scroll", false)
+
+    /**
+     * Hold-to-scroll speed in hundredths of a screen height per second.
+     */
+    val webtoonSmoothKeyScrollSpeed: Preference<Int> = preferenceStore.getInt(
+        "webtoon_smooth_key_scroll_speed",
+        HOLD_SCROLL_SPEED_DEFAULT,
+    )
+
+    /**
+     * When enabled, DPAD_CENTER / ENTER / SPACE toggle webtoon auto-scroll on and off. These
+     * keycodes are otherwise unhandled by the viewer, which makes them bindable from an external
+     * controller such as a Bluetooth ring.
+     */
+    val webtoonAutoScrollKeyToggle: Preference<Boolean> = preferenceStore.getBoolean(
+        "webtoon_auto_scroll_key_toggle",
+        false,
+    )
+
+    /**
+     * When enabled, three quick presses of volume up toggle auto-scroll. Only active while volume
+     * keys are already claimed for reading, so it never swallows a real volume change.
+     */
+    val webtoonAutoScrollVolumeTriplePress: Preference<Boolean> = preferenceStore.getBoolean(
+        "webtoon_auto_scroll_volume_triple_press",
+        false,
+    )
+
+    /**
+     * Auto-scroll speed in hundredths of a screen height per second.
+     */
+    val webtoonAutoScrollSpeed: Preference<Int> = preferenceStore.getInt(
+        "webtoon_auto_scroll_speed",
+        AUTO_SCROLL_SPEED_DEFAULT,
+    )
+
     val readerHideThreshold: Preference<ReaderHideThreshold> = preferenceStore.getEnum(
         "reader_hide_threshold",
         ReaderHideThreshold.LOW,
@@ -301,6 +342,21 @@ class ReaderPreferences(
     companion object {
         const val WEBTOON_PADDING_MIN = 0
         const val WEBTOON_PADDING_MAX = 25
+
+        // Auto-scroll speed, in hundredths of a screen height per second.
+        const val AUTO_SCROLL_SPEED_MIN = 2
+        const val AUTO_SCROLL_SPEED_MAX = 60
+        const val AUTO_SCROLL_SPEED_DEFAULT = 10
+
+        // Presets offered by the on-screen indicator, for changing pace without opening settings.
+        const val AUTO_SCROLL_SPEED_SLOW = 5
+        const val AUTO_SCROLL_SPEED_MEDIUM = 10
+        const val AUTO_SCROLL_SPEED_FAST = 20
+
+        // Hold-to-scroll speed, in hundredths of a screen height per second.
+        const val HOLD_SCROLL_SPEED_MIN = 25
+        const val HOLD_SCROLL_SPEED_MAX = 125
+        const val HOLD_SCROLL_SPEED_DEFAULT = 75
 
         const val MILLI_CONVERSION = 100
 
