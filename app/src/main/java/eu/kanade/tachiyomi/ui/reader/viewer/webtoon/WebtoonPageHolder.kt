@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.translation.OverlayBlock
 import eu.kanade.tachiyomi.ui.reader.translation.PageTranslationScheduler
+import eu.kanade.tachiyomi.ui.reader.translation.TranslatePerf
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -99,6 +100,11 @@ class WebtoonPageHolder(
      */
     private var decodedPage: ReaderPage? = null
 
+    /**
+     * When [bind] was last called, for [TranslatePerf].
+     */
+    private var boundAtMillis = 0L
+
     private val translationTarget = object : PageTranslationScheduler.Target {
         override val position: Int
             get() = bindingAdapterPosition
@@ -108,6 +114,12 @@ class WebtoonPageHolder(
 
         override val viewWidth: Int
             get() = frame.width
+
+        override val topInViewport: Int?
+            get() = frame.takeIf { it.isAttachedToWindow && it.parent === viewer.recycler }?.top
+
+        override val viewportHeight: Int
+            get() = viewer.recycler.height
 
         override fun show(blocks: List<OverlayBlock>, fadeInFrom: Int) {
             translationOverlay?.show(blocks, fadeInFrom)
@@ -127,6 +139,7 @@ class WebtoonPageHolder(
      * Binds the given [page] with this view holder, subscribing to its state.
      */
     fun bind(page: ReaderPage) {
+        if (TranslatePerf.ENABLED) boundAtMillis = TranslatePerf.now()
         stopTranslation()
         decodedPage = null
         this.page = page
@@ -299,6 +312,9 @@ class WebtoonPageHolder(
         progressContainer.isVisible = false
         removeErrorLayout()
         decodedPage = page
+        if (TranslatePerf.ENABLED && viewer.translationEnabled) {
+            page?.let { TranslatePerf.log("decoded p=${it.index} ms=${TranslatePerf.now() - boundAtMillis}") }
+        }
         page?.let { viewer.onPageImageDecoded(it) }
         if (viewer.translationEnabled) startTranslation()
     }
