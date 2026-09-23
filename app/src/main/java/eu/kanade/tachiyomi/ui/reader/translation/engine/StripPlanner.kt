@@ -37,12 +37,12 @@ object StripPlanner {
     }
 
     /**
-     * What is ready to publish after a band, and what has to wait for the next one.
+     * What is ready to publish after a band, and what has to wait for bands still to be read.
      *
-     * @param publish groups of lines, each one bubble in reading order, that no later band can
-     * change.
-     * @param carried lines held for the next band, because they reach into it or belong to a
-     * bubble that does.
+     * @param publish groups of lines, each one bubble in reading order, that no band still to be
+     * read can change.
+     * @param carried lines held back, unpublished, because they reach into a band still to be read
+     * or belong to a bubble that does.
      */
     data class Advance(val publish: List<List<RecognizedLine>>, val carried: List<CarriedLine>)
 
@@ -121,7 +121,8 @@ object StripPlanner {
     }
 
     /**
-     * Folds band [bandIndex]'s lines into the page.
+     * Folds band [bandIndex]'s lines into the page, when the bands are read top to bottom. The same
+     * as [settle] with every band above this one done.
      *
      * @param bands the page's bands, from [plan].
      * @param carried what the previous call held back.
@@ -134,30 +135,64 @@ object StripPlanner {
         carried: List<CarriedLine>,
         found: List<RecognizedLine>,
         group: (List<RecognizedLine>) -> List<List<RecognizedLine>>,
+    ): Advance = settle(bands, bandIndex, (0..<bandIndex).toSet(), carried, found, group)
+
+    /**
+     * Folds band [bandIndex]'s lines into the page, with the bands read in any order.
+     *
+     * Each seam is resolved once, by whichever of its two bands is read second: every line of the
+     * first one that reaches into the second is still held then, since the second wasn't read yet.
+     * A bubble is published once none of its lines reach into a band that is still to be read.
+     *
+     * @param bands the page's bands, from [plan].
+     * @param done the bands read before this one.
+     * @param held the lines those bands held back, see [Advance.carried].
+     * @param found the lines found in this band, already moved into page coordinates.
+     * @param group groups lines into bubbles, see [LineGrouper.group].
+     */
+    fun settle(
+        bands: List<Band>,
+        bandIndex: Int,
+        done: Set<Int>,
+        held: List<CarriedLine>,
+        found: List<RecognizedLine>,
+        group: (List<RecognizedLine>) -> List<List<RecognizedLine>>,
     ): Advance {
         val band = bands[bandIndex]
-        val previous = bands.getOrNull(bandIndex - 1)
-        val next = bands.getOrNull(bandIndex + 1)
+        val above = bandIndex - 1
+        val below = bandIndex + 1
 
-        // Only lines from the band just above can overlap this one.
-        val fromPrevious = carried.filter { it.band == bandIndex - 1 }
-        val older = carried.filter { it.band != bandIndex - 1 }
-        val (keptPrevious, keptFound) = if (previous != null && fromPrevious.isNotEmpty()) {
-            resolveSeam(fromPrevious.map { it.line }, previous, found, band)
-        } else {
-            fromPrevious.map { it.line } to found
+        // Only lines from the bands either side can overlap this one.
+        val fromAbove = held.filter { it.band == above }.map { it.line }
+        val fromBelow = held.filter { it.band == below }.map { it.line }
+        val others = held.filter { it.band != above && it.band != below }
+
+        var keptFound = found
+        var keptAbove = fromAbove
+        if (above in done && fromAbove.isNotEmpty()) {
+            val (upper, lower) = resolveSeam(fromAbove, bands[above], keptFound, band)
+            keptAbove = upper
+            keptFound = lower
+        }
+        var keptBelow = fromBelow
+        if (below in done && fromBelow.isNotEmpty()) {
+            val (upper, lower) = resolveSeam(keptFound, band, fromBelow, bands[below])
+            keptFound = upper
+            keptBelow = lower
         }
 
         val bandOf = IdentityHashMap<RecognizedLine, Int>()
-        older.forEach { bandOf[it.line] = it.band }
-        keptPrevious.forEach { bandOf[it] = bandIndex - 1 }
+        others.forEach { bandOf[it.line] = it.band }
+        keptAbove.forEach { bandOf[it] = above }
         keptFound.forEach { bandOf[it] = bandIndex }
+        keptBelow.forEach { bandOf[it] = below }
 
-        val all = older.map { it.line } + keptPrevious + keptFound
+        val all = others.map { it.line } + keptAbove + keptFound + keptBelow
         if (all.isEmpty()) return Advance(emptyList(), emptyList())
 
-        // A line reaching into the next band might be cut, or found again there.
-        fun pending(line: RecognizedLine) = next != null && line.box.bottom > next.top
+        // A line reaching into a band still to be read might be cut, or found again there.
+        val unread = bands.filter { it.index != bandIndex && it.index !in done }
+        fun pending(line: RecognizedLine) = unread.any { line.box.bottom > it.top && line.box.top < it.bottom }
 
         val publish = mutableListOf<List<RecognizedLine>>()
         val hold = mutableListOf<CarriedLine>()

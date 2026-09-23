@@ -110,15 +110,19 @@ class PageTranslationScheduler(
         val bitmapWidth: Int,
         val bitmapHeight: Int,
         val bands: List<StripPlanner.Band>,
-        var nextBand: Int,
-        var carried: List<CarriedLine>,
+        /** Bands read, in any order. */
+        val done: MutableSet<Int>,
+        /** Lines the bands in [done] held back, see [StripPlanner.settle]. */
+        var held: List<CarriedLine>,
         val blocks: MutableList<Bubble>,
     ) {
         var target: Target? = null
-        var recognizing = false
+
+        /** Bands being read right now. */
+        val reading = mutableSetOf<Int>()
         var inFlight = 0
         var abandoned = false
-        val isRecognized: Boolean get() = nextBand >= bands.size
+        val isRecognized: Boolean get() = done.size == bands.size
 
         /** When the job was created, for [TranslatePerf]. */
         val createdAt = TranslatePerf.now()
@@ -130,9 +134,7 @@ class PageTranslationScheduler(
     private class BandResult(
         val job: PageJob,
         val bandIndex: Int,
-        val bandsDone: Int,
         val drafts: List<Draft>,
-        val carried: List<CarriedLine>,
     ) {
         /** When it was handed to the translator, for [TranslatePerf]. */
         val queuedAt = TranslatePerf.now()
@@ -196,8 +198,9 @@ class PageTranslationScheduler(
                 bitmapWidth = bitmap.width,
                 bitmapHeight = bitmap.height,
                 bands = bands,
-                nextBand = (resume?.status as? PageStatus.Partial)?.bandsDone?.coerceIn(0, bands.size) ?: 0,
-                carried = resume?.carried.orEmpty(),
+                done = (resume?.status as? PageStatus.Partial)?.bandsDone.orEmpty()
+                    .filterTo(mutableSetOf()) { it in bands.indices },
+                held = resume?.carried.orEmpty(),
                 blocks = resume?.blocks.orEmpty().toMutableList(),
             )
             jobs[key] = job
@@ -206,14 +209,14 @@ class PageTranslationScheduler(
                 perf?.requested(lead)
                 TranslatePerf.log(
                     "req p=${key.pageIndex} ch=${key.chapterId} w=${bitmap.width} h=${bitmap.height}" +
-                        " bands=${bands.size} lead=${lead ?: "na"} resume=${job.nextBand}",
+                        " bands=${bands.size} lead=${lead ?: "na"} resume=${job.done.size}",
                 )
             }
         }
         val attached = job
         attached.target = target
         if (attached.blocks.isNotEmpty()) {
-            showCached(key, TranslatedPage(PageStatus.Partial(0), attached.blocks.toList(), 0, 0), target) {
+            showCached(key, TranslatedPage(PageStatus.Partial(emptySet()), attached.blocks.toList(), 0, 0), target) {
                 active && attached.target === target
             }
         }
@@ -279,32 +282,37 @@ class PageTranslationScheduler(
 
     private suspend fun recognizeLoop() {
         while (scope.isActive) {
-            val job = pickNext()
-            if (job == null) {
+            val next = pickNext()
+            if (next == null) {
                 wake.receive()
                 continue
             }
+            val (job, bandIndex) = next
             if (!ensureModels(job.key.sourceLang, job.key.targetLang)) {
                 // Waiting for Wi-Fi, or for Play services. Try again on the next scroll, or soon.
                 withTimeoutOrNull(MODELS_RETRY_MILLIS) { wake.receive() }
                 continue
             }
-            if (!job.abandoned) recognizeNextBand(job)
+            if (!job.abandoned) recognizeBand(job, bandIndex)
         }
     }
 
     /**
-     * The runnable page closest to the focus, or null when there is nothing to do.
+     * The next band to read, of the runnable page closest to the focus, or null when there is
+     * nothing to do.
      */
-    private fun pickNext(): PageJob? {
-        return jobs.values
-            .filter { !it.abandoned && !it.recognizing && !it.isRecognized }
+    private fun pickNext(): Pair<PageJob, Int>? {
+        val job = jobs.values
+            .filter { !it.abandoned && it.reading.isEmpty() && !it.isRecognized }
             .mapNotNull { job ->
                 val position = job.target?.position ?: return@mapNotNull null
                 if (position == RecyclerView.NO_POSITION) null else job to priorityOf(position, focus)
             }
             .minByOrNull { it.second }
             ?.first
+            ?: return null
+        val band = job.bands.first { it.index !in job.done && it.index !in job.reading }
+        return job to band.index
     }
 
     private suspend fun ensureModels(source: String, target: String): Boolean {
@@ -334,8 +342,7 @@ class PageTranslationScheduler(
         return false
     }
 
-    private suspend fun recognizeNextBand(job: PageJob) {
-        val bandIndex = job.nextBand
+    private suspend fun recognizeBand(job: PageJob, bandIndex: Int) {
         val band = job.bands[bandIndex]
         val prio = if (TranslatePerf.ENABLED) screenLabel(job, band) else null
         val copyStart = if (TranslatePerf.ENABLED) TranslatePerf.now() else 0L
@@ -348,7 +355,7 @@ class PageTranslationScheduler(
         }
         val ocrStart = if (TranslatePerf.ENABLED) TranslatePerf.now() else 0L
 
-        job.recognizing = true
+        job.reading += bandIndex
         job.inFlight++
         var handedOff = false
         try {
@@ -357,11 +364,21 @@ class PageTranslationScheduler(
             val outcome = attempt {
                 val lines = withContext(Dispatchers.Default) { translator.recognize(copy, source) }
                 if (TranslatePerf.ENABLED) ocrMillis = TranslatePerf.now() - ocrStart
-                withContext(Dispatchers.Default) {
-                    val found = lines.map { it.copy(box = it.box.offset(0f, band.top.toFloat())) }
-                    val advance = StripPlanner.advance(job.bands, bandIndex, job.carried, found, LineGrouper::group)
-                    Triple(advance, advance.publish.mapNotNull { draft(it, copy, band, job, source) }, found.size)
+                val found = lines.map { it.copy(box = it.box.offset(0f, band.top.toFloat())) }
+                // Back on the main thread, which is the only one that touches the job's bands and
+                // held lines. One band is read at a time, so they can't change until it's done.
+                val advance = StripPlanner.settle(
+                    job.bands,
+                    bandIndex,
+                    job.done.toSet(),
+                    job.held,
+                    found,
+                    LineGrouper::group,
+                )
+                val drafts = withContext(Dispatchers.Default) {
+                    advance.publish.mapNotNull { draft(it, copy, band, job, source) }
                 }
+                Triple(advance, drafts, found.size)
             }
             // Only once ML Kit is done with the copy. When this coroutine is cancelled (attempt
             // rethrows) or the recognition fails, ML Kit may still be reading it, so the GC takes it.
@@ -375,7 +392,7 @@ class PageTranslationScheduler(
             if (TranslatePerf.ENABLED) {
                 val now = TranslatePerf.now()
                 TranslatePerf.log(
-                    "band p=${job.key.pageIndex} b=$bandIndex/${job.bands.size} order=$bandIndex prio=$prio" +
+                    "band p=${job.key.pageIndex} b=$bandIndex/${job.bands.size} order=${job.done.size} prio=$prio" +
                         " sinceReq=${now - job.createdAt} copy=${ocrStart - copyStart} blank=0 ocr=$ocrMillis" +
                         " lines=$lineCount held=${advance.carried.size}",
                 )
@@ -386,15 +403,13 @@ class PageTranslationScheduler(
                     busyMillis = now - ocrStart,
                 )
             }
-            job.nextBand = bandIndex + 1
-            job.carried = advance.carried
+            job.done += bandIndex
+            job.held = advance.carried
             if (!job.abandoned) {
-                handedOff = translateQueue
-                    .trySend(BandResult(job, bandIndex, bandIndex + 1, drafts, advance.carried))
-                    .isSuccess
+                handedOff = translateQueue.trySend(BandResult(job, bandIndex, drafts)).isSuccess
             }
         } finally {
-            job.recognizing = false
+            job.reading -= bandIndex
             if (!handedOff) finishInFlight(job)
         }
     }
@@ -506,14 +521,19 @@ class PageTranslationScheduler(
         }
         val before = job.blocks.size
         job.blocks += bubbles
-        val done = result.bandsDone >= job.bands.size
-        cache[job.key] = TranslatedPage(
-            status = if (done) PageStatus.Complete else PageStatus.Partial(result.bandsDone),
-            blocks = job.blocks.toList(),
-            bitmapWidth = job.bitmapWidth,
-            bitmapHeight = job.bitmapHeight,
-            carried = result.carried,
-        )
+        if (job.inFlight == 1) {
+            // Nothing else of this page is being read or waiting to be translated, so every band in
+            // done has its bubbles in blocks: a consistent point to resume from. Not otherwise,
+            // since the other results are dropped if the job is abandoned, and their bands would
+            // then be skipped on resuming.
+            cache[job.key] = TranslatedPage(
+                status = if (job.isRecognized) PageStatus.Complete else PageStatus.Partial(job.done.toSet()),
+                blocks = job.blocks.toList(),
+                bitmapWidth = job.bitmapWidth,
+                bitmapHeight = job.bitmapHeight,
+                carried = job.held,
+            )
+        }
         val buckets = if (bubbles.isNotEmpty()) publish(job, before) else null
         if (TranslatePerf.ENABLED) {
             val counts = buckets ?: IntArray(PerfStats.Bucket.entries.size)
@@ -603,7 +623,7 @@ class PageTranslationScheduler(
         if (jobs[job.key] !== job) return
         jobs.remove(job.key)
         if (TranslatePerf.ENABLED && !job.isRecognized) {
-            TranslatePerf.log("drop p=${job.key.pageIndex} done=${job.nextBand}/${job.bands.size}")
+            TranslatePerf.log("drop p=${job.key.pageIndex} done=${job.done.size}/${job.bands.size}")
             perf?.dropped()
         }
     }

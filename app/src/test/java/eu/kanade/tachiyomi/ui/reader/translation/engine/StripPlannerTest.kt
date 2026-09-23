@@ -2,8 +2,10 @@ package eu.kanade.tachiyomi.ui.reader.translation.engine
 
 import eu.kanade.tachiyomi.ui.reader.translation.CarriedLine
 import eu.kanade.tachiyomi.ui.reader.translation.RecognizedLine
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -158,5 +160,144 @@ class StripPlannerTest {
 
         result.publish.shouldBeEmpty()
         result.carried shouldContainExactly listOf(CarriedLine(old, 0), CarriedLine(newer, 2))
+    }
+
+    // A page read band by band in any order. Each band sees the lines that reach into it, clipped
+    // to it; a clipped copy is marked, so a test can tell if one is ever published.
+    private fun read(page: List<RecognizedLine>, band: StripPlanner.Band): List<RecognizedLine> =
+        page.filter { it.box.bottom > band.top && it.box.top < band.bottom }.map {
+            val top = maxOf(it.box.top, band.top.toFloat())
+            val bottom = minOf(it.box.bottom, band.bottom.toFloat())
+            if (top == it.box.top && bottom == it.box.bottom) {
+                it.copy()
+            } else {
+                it.copy(text = "${it.text}~cut", box = it.box.copy(top = top, bottom = bottom))
+            }
+        }
+
+    /** Reads [page]'s bands in [order], returning each published bubble's texts. */
+    private fun readInOrder(
+        bands: List<StripPlanner.Band>,
+        page: List<RecognizedLine>,
+        order: List<Int>,
+    ): List<List<String>> {
+        val done = mutableSetOf<Int>()
+        var held = emptyList<CarriedLine>()
+        val published = mutableListOf<List<String>>()
+        for (i in order) {
+            val result = StripPlanner.settle(bands, i, done.toSet(), held, read(page, bands[i])) {
+                LineGrouper.group(it)
+            }
+            published += result.publish.map { bubble -> bubble.map { it.text } }
+            held = result.carried
+            done += i
+        }
+        held.shouldBeEmpty()
+        return published
+    }
+
+    private fun permutations(items: List<Int>): List<List<Int>> =
+        if (items.size <= 1) {
+            listOf(items)
+        } else {
+            items.flatMap { first -> permutations(items - first).map { listOf(first) + it } }
+        }
+
+    // Bands of an 800 px wide page: [0, 1000), [904, 1904), [1808, 2808), [2712, 3712).
+    private val fourBands = StripPlanner.plan(800, 3712)
+
+    private val fourBandPage = listOf(
+        line("a1", 100f, 100f, 300f, 130f),
+        // Whole in both bands 0 and 1.
+        line("dup", 100f, 930f, 300f, 960f),
+        line("b1", 100f, 1400f, 300f, 1430f),
+        // One bubble across the seam of bands 1 and 2: s1 is cut by band 2, s4 by band 1, and s2
+        // and s3 are whole in both.
+        line("s1", 100f, 1780f, 300f, 1810f),
+        line("s2", 100f, 1818f, 300f, 1848f),
+        line("s3", 100f, 1856f, 300f, 1886f),
+        line("s4", 100f, 1894f, 300f, 1924f),
+        line("t1", 100f, 2750f, 300f, 2780f),
+        line("z", 100f, 3500f, 300f, 3530f),
+    )
+
+    @Test
+    fun `the test page has the bands it was drawn for`() {
+        fourBands.map { it.top to it.bottom } shouldContainExactly
+            listOf(0 to 1000, 904 to 1904, 1808 to 2808, 2712 to 3712)
+    }
+
+    @Test
+    fun `reading bands bottom to top publishes the same bubbles as top to bottom`() {
+        val bands = StripPlanner.plan(800, 2808)
+        val page = fourBandPage.filter { it.box.bottom <= 2808f }
+
+        val inOrder = readInOrder(bands, page, listOf(0, 1, 2))
+        val reversed = readInOrder(bands, page, listOf(2, 1, 0))
+
+        inOrder shouldContainExactlyInAnyOrder listOf(
+            listOf("a1"),
+            listOf("dup"),
+            listOf("b1"),
+            listOf("s1", "s2", "s3", "s4"),
+            listOf("t1"),
+        )
+        reversed shouldContainExactlyInAnyOrder inOrder
+    }
+
+    @Test
+    fun `a line touching a band's top edge is held until the band above is read`() {
+        val bands = listOf(StripPlanner.Band(0, 0, 1000), StripPlanner.Band(1, 904, 1904))
+        val whole = line("edge", 100f, 900f, 300f, 930f)
+        val cut = line("edge~cut", 100f, 904f, 300f, 930f)
+
+        val first = StripPlanner.settle(bands, 1, emptySet(), emptyList(), listOf(cut)) { LineGrouper.group(it) }
+        first.publish.shouldBeEmpty()
+        first.carried shouldContainExactly listOf(CarriedLine(cut, 1))
+
+        val second = StripPlanner.settle(bands, 0, setOf(1), first.carried, listOf(whole)) {
+            LineGrouper.group(it)
+        }
+        second.publish shouldContainExactly listOf(listOf(whole))
+        second.carried.shouldBeEmpty()
+    }
+
+    @Test
+    fun `in every order each line is published exactly once and the bubbles match reading in order`() {
+        val inOrder = readInOrder(fourBands, fourBandPage, listOf(0, 1, 2, 3))
+        inOrder.flatten() shouldContainExactlyInAnyOrder fourBandPage.map { it.text }
+
+        val orders = permutations(listOf(0, 1, 2, 3))
+        orders shouldHaveSize 24
+        for (order in orders) {
+            val published = readInOrder(fourBands, fourBandPage, order)
+            withClue("order $order") {
+                published.flatten() shouldContainExactlyInAnyOrder fourBandPage.map { it.text }
+                published shouldContainExactlyInAnyOrder inOrder
+            }
+        }
+    }
+
+    @Test
+    fun `nothing is held once every band is done`() {
+        val done = mutableSetOf<Int>()
+        var held = emptyList<CarriedLine>()
+        for (i in listOf(3, 1, 0, 2)) {
+            val result = StripPlanner.settle(fourBands, i, done.toSet(), held, read(fourBandPage, fourBands[i])) {
+                LineGrouper.group(it)
+            }
+            held = result.carried
+            done += i
+        }
+        held.shouldBeEmpty()
+    }
+
+    @Test
+    fun `advance is settle with every band above done`() {
+        val found = read(fourBandPage, fourBands[0])
+        val advance = StripPlanner.advance(fourBands, 0, emptyList(), found) { LineGrouper.group(it) }
+        val settle = StripPlanner.settle(fourBands, 0, emptySet(), emptyList(), found) { LineGrouper.group(it) }
+        advance shouldBe settle
+        advance.carried.map { it.line.text } shouldContainExactly listOf("dup")
     }
 }

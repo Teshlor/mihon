@@ -75,16 +75,16 @@ data class Bubble(
 )
 
 /**
- * A line held back at a band seam until the band below has been read, so that a bubble split by
- * the seam is grouped and translated as one.
+ * A line held back, unpublished, at a band seam until the band on the other side has been read, so
+ * that a bubble split by the seam is grouped and translated as one.
  *
  * @param band index of the band the line was found in.
  */
 data class CarriedLine(val line: RecognizedLine, val band: Int)
 
 sealed interface PageStatus {
-    /** [bandsDone] bands have been read and published; the rest are still to do. */
-    data class Partial(val bandsDone: Int) : PageStatus
+    /** The bands in [bandsDone] have been read and published; the rest are still to do. */
+    data class Partial(val bandsDone: Set<Int>) : PageStatus
 
     data object Complete : PageStatus
 
@@ -96,6 +96,7 @@ sealed interface PageStatus {
  *
  * @param bitmapWidth width of the decoded image the page was read from. A partial result can
  * only be resumed on an image of the same size, since bands and [carried] lines are in its pixels.
+ * @param carried lines held back, unpublished, by the bands read so far.
  */
 data class TranslatedPage(
     val status: PageStatus,
