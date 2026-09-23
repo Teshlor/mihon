@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
@@ -60,7 +61,30 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     private var pageView: View? = null
 
+    /**
+     * Drawn over the page, see [addOverlay].
+     */
+    private var overlayView: View? = null
+
     private var config: Config? = null
+
+    /**
+     * The bitmap the webtoon viewer decoded for this page and handed to the page view, or null
+     * for animated pages, the paged viewers, and once the page is recycled.
+     *
+     * The page view recycles this bitmap when it is recycled or given a new image, on the main
+     * thread. Only read its pixels on the main thread, after checking [Bitmap.isRecycled].
+     */
+    var decodedBitmap: Bitmap? = null
+        private set
+
+    /**
+     * Width and height of the image the page view shows, 0 until it is ready.
+     */
+    val sourceWidth: Int
+        get() = readyPageView()?.sWidth ?: 0
+    val sourceHeight: Int
+        get() = readyPageView()?.sHeight ?: 0
 
     var onImageLoaded: (() -> Unit)? = null
     var onImageLoadError: ((Throwable?) -> Unit)? = null
@@ -234,6 +258,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(drawable: Drawable, config: Config) {
         this.config = config
+        decodedBitmap = null
         if (drawable is Animatable) {
             prepareAnimatedImageView()
             setAnimatedImage(drawable, config)
@@ -245,6 +270,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
         this.config = config
+        decodedBitmap = null
         if (isAnimated) {
             prepareAnimatedImageView()
             setAnimatedImage(source, config)
@@ -255,11 +281,34 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     fun recycle() = pageView?.let {
+        decodedBitmap = null
         when (it) {
             is SubsamplingScaleImageView -> it.recycle()
             is AppCompatImageView -> it.dispose()
         }
         it.isVisible = false
+    }
+
+    /**
+     * Maps a point in the image's pixels ([sourceWidth] x [sourceHeight]) to this view's
+     * coordinates, into [out]. Returns null until the page view is ready.
+     */
+    fun sourceToView(x: Float, y: Float, out: PointF): PointF? =
+        readyPageView()?.sourceToViewCoord(x, y, out)
+
+    private fun readyPageView(): SubsamplingScaleImageView? =
+        (pageView as? SubsamplingScaleImageView)?.takeIf { it.isReady }
+
+    /**
+     * Adds [view] on top of the page, filling it. It stays on top when the page view is replaced.
+     * The view must not ask for any height of its own, or it would change the page's height in
+     * the webtoon viewer.
+     */
+    fun addOverlay(view: View) {
+        if (overlayView === view) return
+        overlayView?.let(::removeView)
+        overlayView = view
+        addView(view, MATCH_PARENT, MATCH_PARENT)
     }
 
     /**
@@ -342,6 +391,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             setOnClickListener { this@ReaderPageImageView.onViewClicked() }
         }
         addView(pageView, MATCH_PARENT, MATCH_PARENT)
+        overlayView?.bringToFront()
     }
 
     private fun SubsamplingScaleImageView.setupZoom(config: Config?) {
@@ -399,6 +449,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                         onSuccess = { result ->
                             val image = result as BitmapImage
                             setImage(ImageSource.bitmap(image.bitmap))
+                            decodedBitmap = image.bitmap
                             isVisible = true
                         },
                     )
@@ -458,6 +509,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             }
         }
         addView(pageView, MATCH_PARENT, MATCH_PARENT)
+        overlayView?.bringToFront()
     }
 
     private fun setAnimatedImage(
